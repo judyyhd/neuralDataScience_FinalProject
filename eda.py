@@ -7,13 +7,13 @@ import os
 import json
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
+import nbformat
+import re
 
 # Set up paths
-BASE_PATH = Path("/Users/judyyhd/Desktop/Fall 25/NDS/neuralDataScience")
-OUTPUT_DIR = Path("/Users/judyyhd/Desktop/Fall 25/NDS/final project")
+BASE_PATH = Path("/home/hy1331/NDS/neuralDataScience")
+OUTPUT_DIR = Path("/home/hy1331/NDS/neuralDataScience_FinalProject")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Initialize data collection
@@ -23,6 +23,51 @@ print("=" * 80)
 print("NEURAL DATA SCIENCE - DATA EXPLORATION")
 print("=" * 80)
 
+def extract_dataframe_info_from_notebook(notebook_path):
+    """Extract information about dataframes created in a notebook"""
+    try:
+        with open(notebook_path, 'r') as f:
+            nb = nbformat.read(f, as_version=4)
+        
+        info = {
+            'sql_queries': [],
+            'table_references': [],
+            'dataframe_operations': [],
+            'column_references': []
+        }
+        
+        for cell in nb.cells:
+            if cell.cell_type == 'code':
+                source = cell.source
+                
+                # Extract SQL queries
+                sql_matches = re.findall(r'"""(SELECT.*?)"""', source, re.DOTALL | re.IGNORECASE)
+                info['sql_queries'].extend(sql_matches)
+                
+                # Extract table references
+                table_matches = re.findall(r'FROM\s+([`\w.-]+)', source, re.IGNORECASE)
+                info['table_references'].extend(table_matches)
+                
+                # Extract column references from df.columns or similar
+                col_matches = re.findall(r'\.columns.*?=.*?\[(.*?)\]', source, re.DOTALL)
+                info['column_references'].extend(col_matches)
+                
+                # Extract dataframe shape information from outputs
+                if hasattr(cell, 'outputs'):
+                    for output in cell.outputs:
+                        if output.output_type == 'execute_result' or output.output_type == 'stream':
+                            if 'text' in output:
+                                text = str(output.text)
+                                shape_match = re.search(r'\((\d+),\s*(\d+)\)', text)
+                                if shape_match:
+                                    info['dataframe_operations'].append({
+                                        'shape': (int(shape_match.group(1)), int(shape_match.group(2)))
+                                    })
+        
+        return info
+    except Exception as e:
+        return {'error': str(e)}
+
 # ============================================================================
 # LAB 1: Electrophysiology - Monkey MT (V5) Neuron Response
 # ============================================================================
@@ -31,184 +76,268 @@ print("-" * 80)
 
 try:
     mt_data = pd.read_csv(BASE_PATH / "lab1_ephys_mt" / "mt_neuron.csv")
-    print(f"✓ Loaded MT neuron data: {mt_data.shape}")
-    print(f"  Columns: {list(mt_data.columns)}")
-    print(f"  Data types:\n{mt_data.dtypes}")
-    print(f"\n  Summary statistics:")
-    print(mt_data.describe())
+    print(f"✓ Loaded MT neuron data")
+    print(f"  Data shape: {mt_data.shape[0]} rows × {mt_data.shape[1]} columns")
+    print(f"  Number of features: {mt_data.shape[1]}")
+    print(f"  Column names: {list(mt_data.columns)}")
+    print(f"  Data types: {dict(mt_data.dtypes)}")
+    print(f"  Memory usage: {mt_data.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
     data_summary['Lab 1: MT Neuron'] = {
         'source': 'CSV file',
-        'shape': mt_data.shape,
-        'columns': list(mt_data.columns),
-        'data': mt_data
+        'rows': mt_data.shape[0],
+        'columns': mt_data.shape[1],
+        'column_names': list(mt_data.columns),
+        'dtypes': dict(mt_data.dtypes),
+        'memory_mb': mt_data.memory_usage(deep=True).sum() / 1024**2
     }
 except Exception as e:
     print(f"✗ Error loading MT data: {e}")
 
 # ============================================================================
-# LAB 2-10: BigQuery and Allen SDK Data
+# LAB 2: BigQuery Integration (Same MT data as Lab 1)
 # ============================================================================
-print("\n" + "=" * 80)
-print("BIGQUERY & ALLEN SDK DATA SOURCES")
-print("=" * 80)
+print("\n[LAB 2] BigQuery Integration - MT Neuron Data")
+print("-" * 80)
 
-data_sources_info = {
-    'Lab 2': {
-        'dataset': 'neural-ds-fe73.lab1_ephys.mt',
-        'description': 'MT neuron data via BigQuery',
-        'fields': ['trial_id', 'spike_times', 'condition_id', 'condition_angle', 'unit_label'],
-        'focus': 'Single unit analysis via cloud'
-    },
-    'Lab 3': {
-        'dataset': 'neural-ds-fe73.lab1_ephys.mt',
-        'description': 'Curve fitting on MT neuron tuning curves',
-        'focus': 'Direction tuning'
-    },
-    'Lab 4': {
-        'dataset': 'Neural population coding data',
-        'description': 'Population coding from mouse V1',
-        'focus': 'Information theory analysis'
-    },
-    'Lab 5': {
-        'dataset': 'Population coding continuation',
-        'description': 'Algorithm implementation for decoding',
-        'focus': 'Decoding algorithms'
-    },
-    'Lab 6': {
-        'dataset': 'neural-ds-fe73.lab6_mouse_lfp',
-        'description': 'Mouse electrophysiology recordings',
-        'focus': 'LFP signal analysis'
-    },
-    'Lab 7': {
-        'dataset': 'neural-ds-fe73.lab6_mouse_lfp',
-        'description': 'Mouse ephys signal analysis',
-        'focus': 'Temporal dynamics'
-    },
-    'Lab 8': {
-        'dataset': 'neural-ds-fe73.lab6_mouse_lfp.auditory_cortex',
-        'description': 'Mouse auditory cortex LFP frequency analysis',
-        'fields': ['session', 'condition', 'frequency', 'amplitude', 'trial_num', 'trace'],
-        'focus': 'Frequency domain analysis, FFT'
-    },
-    'Lab 9': {
-        'dataset': 'Allen Brain Observatory Neuropixels Data (via EcephysProjectCache)',
-        'description': 'Large-scale multi-area neural recordings',
-        'focus': 'PCA dimensionality reduction'
-    },
-    'Lab 10': {
-        'dataset': 'Allen Brain Observatory Neuropixels Data',
-        'description': 'Neuropixels recordings from multiple brain areas',
-        'focus': 'NMF decomposition, factor analysis'
+lab2_notebook = BASE_PATH / "lab2_bigquery_integration" / "lab2_ephys_mt_with_bigquery.ipynb"
+if lab2_notebook.exists():
+    lab2_info = extract_dataframe_info_from_notebook(lab2_notebook)
+    print(f"  Data source: BigQuery")
+    if lab2_info['table_references']:
+        print(f"  Tables used: {', '.join(set(lab2_info['table_references']))}")
+    if lab2_info['sql_queries']:
+        # Parse first query to extract column names
+        first_query = lab2_info['sql_queries'][0]
+        # Extract column names from SELECT clause
+        select_match = re.search(r'SELECT\s+(.*?)\s+FROM', first_query, re.IGNORECASE | re.DOTALL)
+        if select_match:
+            columns_str = select_match.group(1)
+            columns = [c.strip().split()[-1] for c in columns_str.split(',') if c.strip() and c.strip() != '*']
+            if columns:
+                print(f"  Number of features: {len(columns)}")
+                print(f"  Column names: {columns}")
+    data_summary['Lab 2: MT BigQuery'] = {
+        'source': 'BigQuery',
+        'tables': list(set(lab2_info['table_references'])),
+        'sql_queries_found': len(lab2_info['sql_queries'])
     }
-}
-
-print("\nData Sources Overview:")
-for lab, info in data_sources_info.items():
-    print(f"\n{lab}: {info['description']}")
-    print(f"  Dataset: {info['dataset']}")
-    if 'fields' in info:
-        print(f"  Key fields: {', '.join(info['fields'])}")
-    print(f"  Focus: {info['focus']}")
+else:
+    print("  Notebook not found")
+    data_summary['Lab 2: MT BigQuery'] = {'error': 'Notebook not found'}
 
 # ============================================================================
-# ANALYZE AVAILABLE DATA TYPES AND SIZES
+# LAB 3: Curve Fitting
 # ============================================================================
-print("\n" + "=" * 80)
-print("DATA CHARACTERISTICS SUMMARY")
-print("=" * 80)
+print("\n[LAB 3] Curve Fitting")
+print("-" * 80)
 
-data_types_summary = {
-    'Single Unit Electrophysiology': {
-        'labs': ['Lab 1', 'Lab 2', 'Lab 3'],
-        'data_type': 'Spike times, timestamps',
-        'neurons': 'MT neurons (monkey visual cortex)',
-        'variables': 'Direction angle, condition ID',
-        'size_estimate': 'Medium (~1000s of trials)'
-    },
-    'Population Coding': {
-        'labs': ['Lab 4', 'Lab 5'],
-        'data_type': 'Neural population responses',
-        'neurons': 'Multiple neurons, decoded stimulus',
-        'variables': 'Stimulus information, decoding accuracy',
-        'size_estimate': 'Medium-Large'
-    },
-    'Mouse Electrophysiology (LFP)': {
-        'labs': ['Lab 6', 'Lab 7', 'Lab 8'],
-        'data_type': 'Local Field Potential time series',
-        'neurons': 'Mouse cortex (auditory & other areas)',
-        'variables': 'Frequency, amplitude, time series',
-        'size_estimate': 'Large (continuous recordings)'
-    },
-    'Large-Scale Neuropixels': {
-        'labs': ['Lab 9', 'Lab 10'],
-        'data_type': 'Multi-electrode array recordings',
-        'neurons': 'Hundreds of neurons across areas',
-        'variables': 'Spike times, session info, brain regions',
-        'size_estimate': 'Very Large (100+ neurons/session)'
+lab3_notebook = BASE_PATH / "lab3_curve_fitting" / "lab3_curve_fitting.ipynb"
+if lab3_notebook.exists():
+    lab3_info = extract_dataframe_info_from_notebook(lab3_notebook)
+    print(f"  Data source: BigQuery")
+    if lab3_info['table_references']:
+        print(f"  Tables used: {', '.join(set(lab3_info['table_references']))}")
+    if lab3_info['sql_queries']:
+        for i, query in enumerate(lab3_info['sql_queries'][:2]):  # First 2 queries
+            select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE | re.DOTALL)
+            if select_match:
+                columns_str = select_match.group(1)
+                columns = [c.strip().split()[-1].replace(',', '') for c in columns_str.split(',') if c.strip() and c.strip() != '*']
+                if columns:
+                    print(f"  Query {i+1} - Number of features: {len(columns)}")
+                    print(f"  Query {i+1} - Column names: {columns}")
+    data_summary['Lab 3: Curve Fitting'] = {
+        'source': 'BigQuery',
+        'tables': list(set(lab3_info['table_references'])),
+        'sql_queries_found': len(lab3_info['sql_queries'])
     }
-}
-
-print("\nData Types by Research Topic:\n")
-for topic, details in data_types_summary.items():
-    print(f"📊 {topic}")
-    print(f"   Labs: {', '.join(details['labs'])}")
-    print(f"   Type: {details['data_type']}")
-    print(f"   Neurons: {details['neurons']}")
-    print(f"   Variables: {details['variables']}")
-    print(f"   Size: {details['size_estimate']}")
-    print()
+else:
+    print("  Notebook not found")
 
 # ============================================================================
-# RECOMMENDATIONS FOR PROJECT FOCUS
+# LAB 4: Population Coding Data
 # ============================================================================
-print("=" * 80)
-print("RECOMMENDATIONS FOR PROJECT FOCUS")
-print("=" * 80)
+print("\n[LAB 4] Population Coding Data")
+print("-" * 80)
 
-recommendations = """
-Based on the available data, here are recommended project directions:
+lab4_notebook = BASE_PATH / "lab4_population_coding_data" / "lab4_population_coding_data.ipynb"
+if lab4_notebook.exists():
+    lab4_info = extract_dataframe_info_from_notebook(lab4_notebook)
+    print(f"  Data source: BigQuery")
+    if lab4_info['table_references']:
+        print(f"  Tables used: {', '.join(set(lab4_info['table_references']))}")
+    if lab4_info['sql_queries']:
+        for i, query in enumerate(lab4_info['sql_queries'][:2]):
+            select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE | re.DOTALL)
+            if select_match:
+                columns_str = select_match.group(1)
+                columns = [c.strip().split()[-1].replace(',', '') for c in columns_str.split(',') if c.strip() and c.strip() != '*']
+                if columns:
+                    print(f"  Query {i+1} - Number of features: {len(columns)}")
+                    print(f"  Query {i+1} - Column names: {columns}")
+    data_summary['Lab 4: Population Coding'] = {
+        'source': 'BigQuery',
+        'tables': list(set(lab4_info['table_references'])),
+        'sql_queries_found': len(lab4_info['sql_queries'])
+    }
+else:
+    print("  Notebook not found")
 
-1. 🎯 SPIKE TIMING ANALYSIS (Labs 1-3)
-   - Most accessible locally (mt_neuron.csv available)
-   - Classic neuroscience topic: direction selectivity in MT
-   - Could implement: tuning curve fitting, information theory metrics
-   - Complexity: Low-Medium | Data size: Small
+# ============================================================================
+# LAB 5: Population Coding Algorithm
+# ============================================================================
+print("\n[LAB 5] Population Coding Algorithm")
+print("-" * 80)
 
-2. 📈 POPULATION DECODING (Labs 4-5)
-   - Intermediate complexity
-   - Learn about information theory and decoding algorithms
-   - Build classifier to decode stimulus from population response
-   - Complexity: Medium | Data size: Medium
+lab5_notebook = BASE_PATH / "lab5_population_coding_algorithm" / "lab5_population_coding_algorithm.ipynb"
+if lab5_notebook.exists():
+    lab5_info = extract_dataframe_info_from_notebook(lab5_notebook)
+    print(f"  Data source: BigQuery")
+    if lab5_info['table_references']:
+        print(f"  Tables used: {', '.join(set(lab5_info['table_references']))}")
+    if lab5_info['sql_queries']:
+        for i, query in enumerate(lab5_info['sql_queries'][:2]):
+            select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE | re.DOTALL)
+            if select_match:
+                columns_str = select_match.group(1)
+                columns = [c.strip().split()[-1].replace(',', '') for c in columns_str.split(',') if c.strip() and c.strip() != '*']
+                if columns:
+                    print(f"  Query {i+1} - Number of features: {len(columns)}")
+                    print(f"  Query {i+1} - Column names: {columns}")
+    data_summary['Lab 5: Population Coding Algorithm'] = {
+        'source': 'BigQuery',
+        'tables': list(set(lab5_info['table_references'])),
+        'sql_queries_found': len(lab5_info['sql_queries'])
+    }
+else:
+    print("  Notebook not found")
 
-3. 🔊 FREQUENCY DOMAIN ANALYSIS (Labs 8)
-   - Analyze LFP signals in frequency domain (FFT, spectrograms)
-   - Understand oscillations in auditory cortex
-   - Could compare frequency responses across conditions
-   - Complexity: Medium | Data size: Large
+# ============================================================================
+# LAB 6: Mouse Ephys Data
+# ============================================================================
+print("\n[LAB 6] Mouse Ephys Data")
+print("-" * 80)
 
-4. 🧠 HIGH-DIMENSIONAL NEURAL DATA (Labs 9-10)
-   - Allen Brain Observatory data (very comprehensive)
-   - Learn dimensionality reduction (PCA, NMF)
-   - Compare neural representations across brain areas
-   - Complexity: High | Data size: Very Large
+lab6_notebook = BASE_PATH / "lab6_mouse_ephys_data" / "lab6_mouse_ephys_data.ipynb"
+if lab6_notebook.exists():
+    lab6_info = extract_dataframe_info_from_notebook(lab6_notebook)
+    print(f"  Data source: BigQuery")
+    if lab6_info['table_references']:
+        print(f"  Tables used: {', '.join(set(lab6_info['table_references']))}")
+    if lab6_info['sql_queries']:
+        for i, query in enumerate(lab6_info['sql_queries'][:2]):
+            select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE | re.DOTALL)
+            if select_match:
+                columns_str = select_match.group(1)
+                columns = [c.strip().split()[-1].replace(',', '') for c in columns_str.split(',') if c.strip() and c.strip() != '*']
+                if columns:
+                    print(f"  Query {i+1} - Number of features: {len(columns)}")
+                    print(f"  Query {i+1} - Column names: {columns}")
+    data_summary['Lab 6: Mouse Ephys'] = {
+        'source': 'BigQuery',
+        'tables': list(set(lab6_info['table_references'])),
+        'sql_queries_found': len(lab6_info['sql_queries'])
+    }
+else:
+    print("  Notebook not found")
 
-5. 🔄 COMPARATIVE ANALYSIS
-   - Compare single-unit (monkey MT) vs population (mouse)
-   - Compare time-domain (spikes) vs frequency-domain (LFP)
-   - Cross-species, cross-modality comparison
-   - Complexity: Medium-High | Data size: Depends on selection
+# ============================================================================
+# LAB 7: Mouse Ephys Analysis
+# ============================================================================
+print("\n[LAB 7] Mouse Ephys Analysis")
+print("-" * 80)
 
-EASIEST START:
-→ Start with Lab 1 (mt_neuron.csv locally available)
-→ Add Lab 6-8 for larger dataset exploration if desired
-→ Use Labs 9-10 if interested in big data techniques
+lab7_notebook = BASE_PATH / "lab7_mouse_ephys_analysis" / "lab7_mouse_ephys_analysis.ipynb"
+if lab7_notebook.exists():
+    lab7_info = extract_dataframe_info_from_notebook(lab7_notebook)
+    print(f"  Data source: BigQuery")
+    if lab7_info['table_references']:
+        print(f"  Tables used: {', '.join(set(lab7_info['table_references']))}")
+    if lab7_info['sql_queries']:
+        for i, query in enumerate(lab7_info['sql_queries'][:2]):
+            select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE | re.DOTALL)
+            if select_match:
+                columns_str = select_match.group(1)
+                columns = [c.strip().split()[-1].replace(',', '') for c in columns_str.split(',') if c.strip() and c.strip() != '*']
+                if columns:
+                    print(f"  Query {i+1} - Number of features: {len(columns)}")
+                    print(f"  Query {i+1} - Column names: {columns}")
+    data_summary['Lab 7: Mouse Ephys Analysis'] = {
+        'source': 'BigQuery',
+        'tables': list(set(lab7_info['table_references'])),
+        'sql_queries_found': len(lab7_info['sql_queries'])
+    }
+else:
+    print("  Notebook not found")
 
-RECOMMENDATION:
-For a balanced project, combine Labs 1-3 (accessible) with insights from
-Labs 6-8 (larger scale), or focus entirely on Labs 9-10 for a data-heavy project.
-"""
+# ============================================================================
+# LAB 8: Mouse LFP Frequency Analysis
+# ============================================================================
+print("\n[LAB 8] Mouse LFP Frequency Analysis")
+print("-" * 80)
 
-print(recommendations)
+lab8_notebook = BASE_PATH / "lab8_mouse_ephys_frequency_analysis" / "lab8_mouse_lfp_frequency_analysis.ipynb"
+if lab8_notebook.exists():
+    lab8_info = extract_dataframe_info_from_notebook(lab8_notebook)
+    print(f"  Data source: BigQuery")
+    if lab8_info['table_references']:
+        print(f"  Tables used: {', '.join(set(lab8_info['table_references']))}")
+    if lab8_info['sql_queries']:
+        for i, query in enumerate(lab8_info['sql_queries'][:2]):
+            select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE | re.DOTALL)
+            if select_match:
+                columns_str = select_match.group(1)
+                columns = [c.strip().split()[-1].replace(',', '') for c in columns_str.split(',') if c.strip() and c.strip() != '*']
+                if columns:
+                    print(f"  Query {i+1} - Number of features: {len(columns)}")
+                    print(f"  Query {i+1} - Column names: {columns}")
+    data_summary['Lab 8: Mouse LFP'] = {
+        'source': 'BigQuery',
+        'tables': list(set(lab8_info['table_references'])),
+        'sql_queries_found': len(lab8_info['sql_queries'])
+    }
+else:
+    print("  Notebook not found")
+
+# ============================================================================
+# LAB 9: Neuropixels PCA
+# ============================================================================
+print("\n[LAB 9] Neuropixels PCA")
+print("-" * 80)
+
+lab9_notebook = BASE_PATH / "lab9_neuropixels_pca" / "lab9_neuropixels_data.ipynb"
+if lab9_notebook.exists():
+    lab9_info = extract_dataframe_info_from_notebook(lab9_notebook)
+    print(f"  Data source: Allen SDK - EcephysProjectCache")
+    print(f"  Note: This lab uses the Allen Brain Observatory Neuropixels dataset")
+    print(f"  Data structure: Session-based with units table, spike times, stimulus presentations")
+    data_summary['Lab 9: Neuropixels PCA'] = {
+        'source': 'Allen SDK',
+        'access_method': 'EcephysProjectCache.from_warehouse()',
+        'note': 'Large-scale multi-area recordings'
+    }
+else:
+    print("  Notebook not found")
+
+# ============================================================================
+# LAB 10: Neuropixels NMF
+# ============================================================================
+print("\n[LAB 10] Neuropixels NMF")
+print("-" * 80)
+
+lab10_notebook = BASE_PATH / "lab10_neuropixels_nmf" / "lab10_neuropixels_nmf.ipynb"
+if lab10_notebook.exists():
+    lab10_info = extract_dataframe_info_from_notebook(lab10_notebook)
+    print(f"  Data source: Allen SDK - EcephysProjectCache")
+    print(f"  Note: This lab uses the Allen Brain Observatory Neuropixels dataset")
+    print(f"  Data structure: Session-based with units table, spike times, stimulus presentations")
+    data_summary['Lab 10: Neuropixels NMF'] = {
+        'source': 'Allen SDK',
+        'access_method': 'EcephysProjectCache.from_warehouse()',
+        'note': 'Large-scale multi-area recordings'
+    }
+else:
+    print("  Notebook not found")
 
 # ============================================================================
 # SAVE SUMMARY REPORT
@@ -219,83 +348,32 @@ with open(summary_file, 'w') as f:
     f.write("NEURAL DATA SCIENCE - DATA EXPLORATION SUMMARY\n")
     f.write("=" * 80 + "\n\n")
     
-    f.write("AVAILABLE DATA SOURCES:\n")
-    f.write("-" * 80 + "\n")
-    for lab, info in data_sources_info.items():
-        f.write(f"\n{lab}: {info['description']}\n")
-        f.write(f"  Dataset: {info['dataset']}\n")
-        if 'fields' in info:
-            f.write(f"  Key fields: {', '.join(info['fields'])}\n")
-        f.write(f"  Focus: {info['focus']}\n")
+    f.write("DETAILED DATA INFORMATION BY LAB:\n")
+    f.write("=" * 80 + "\n\n")
     
-    f.write("\n" + "=" * 80 + "\n")
-    f.write("DATA TYPES SUMMARY:\n")
-    f.write("-" * 80 + "\n")
-    for topic, details in data_types_summary.items():
-        f.write(f"\n{topic}\n")
-        f.write(f"  Labs: {', '.join(details['labs'])}\n")
-        f.write(f"  Type: {details['data_type']}\n")
-        f.write(f"  Size: {details['size_estimate']}\n")
-    
-    f.write("\n" + "=" * 80 + "\n")
-    f.write(recommendations)
+    for lab_name, details in data_summary.items():
+        f.write(f"{lab_name}\n")
+        f.write("-" * 80 + "\n")
+        for key, value in details.items():
+            if key != 'data':
+                f.write(f"  {key}: {value}\n")
+        f.write("\n")
 
 print(f"\n✓ Summary saved to: {summary_file}")
 
 # ============================================================================
-# CREATE VISUALIZATIONS
+# SAVE DATA SUMMARY AS JSON
 # ============================================================================
-print("\nGenerating visualizations...")
+json_file = OUTPUT_DIR / "data_summary.json"
+json_summary = {}
+for key, value in data_summary.items():
+    json_summary[key] = {k: str(v) for k, v in value.items() if k != 'data'}
 
-try:
-    # Visualization 1: Lab 1 MT data overview
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    fig.suptitle('Lab 1: MT Neuron Data Overview', fontsize=14, fontweight='bold')
-    
-    # Spike count distribution
-    if 'spike_count' in mt_data.columns:
-        axes[0, 0].hist(mt_data['spike_count'], bins=20, color='steelblue', edgecolor='black')
-        axes[0, 0].set_xlabel('Spike Count')
-        axes[0, 0].set_ylabel('Frequency')
-        axes[0, 0].set_title('Spike Count Distribution')
-    
-    # Direction angle distribution
-    if 'direction' in mt_data.columns:
-        axes[0, 1].hist(mt_data['direction'], bins=20, color='coral', edgecolor='black')
-        axes[0, 1].set_xlabel('Direction (degrees)')
-        axes[0, 1].set_ylabel('Frequency')
-        axes[0, 1].set_title('Direction Angle Distribution')
-    
-    # Condition distribution
-    if 'condition_id' in mt_data.columns:
-        condition_counts = mt_data['condition_id'].value_counts()
-        axes[1, 0].bar(range(len(condition_counts)), condition_counts.values, color='mediumseagreen', edgecolor='black')
-        axes[1, 0].set_xlabel('Condition ID')
-        axes[1, 0].set_ylabel('Count')
-        axes[1, 0].set_title('Trials per Condition')
-    
-    # Data shape and columns
-    axes[1, 1].axis('off')
-    info_text = f"Dataset Shape: {mt_data.shape}\n\nColumns:\n"
-    for i, col in enumerate(mt_data.columns[:8]):  # Show first 8 columns
-        info_text += f"  • {col}\n"
-    if len(mt_data.columns) > 8:
-        info_text += f"  ... and {len(mt_data.columns) - 8} more"
-    axes[1, 1].text(0.1, 0.5, info_text, fontsize=11, verticalalignment='center',
-                    family='monospace', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / 'lab1_mt_overview.png', dpi=150, bbox_inches='tight')
-    print("✓ Saved: lab1_mt_overview.png")
-    plt.close()
-    
-except Exception as e:
-    print(f"✗ Error creating visualizations: {e}")
+with open(json_file, 'w') as f:
+    json.dump(json_summary, f, indent=2)
+
+print(f"✓ Data summary saved to: {json_file}")
 
 print("\n" + "=" * 80)
 print("EDA COMPLETE!")
 print("=" * 80)
-print(f"\nNext steps:")
-print("1. Review the data exploration summary")
-print("2. Choose a research focus area")
-print("3. Load specific lab data as needed for your project")
