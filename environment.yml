@@ -1,0 +1,28 @@
+name: neuralDataScience
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  # Core scientific computing
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  # Machine learning
+  - scikit-learn
+  # Jupyter and IPython
+  - jupyter
+  - ipykernel
+  - ipython
+  # Image processing and animation
+  - imageio
+  # Progress bars
+  - tqdm
+  # Pip packages
+  - pip:
+    - google-cloud-bigquery
+    - google-cloud-bigquery-storage
+    - allensdk
+    - sounddevice
