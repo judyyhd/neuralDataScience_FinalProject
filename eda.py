@@ -32,37 +32,57 @@ def extract_dataframe_info_from_notebook(notebook_path):
         info = {
             'sql_queries': [],
             'table_references': [],
-            'dataframe_operations': [],
-            'column_references': []
+            'dataframe_columns': [],
+            'dataframe_shapes': [],
+            'dataframe_row_counts': []
         }
         
         for cell in nb.cells:
             if cell.cell_type == 'code':
                 source = cell.source
                 
-                # Extract SQL queries
+                # Extract SQL queries - including %%bigquery magic
+                # Check for %%bigquery magic command first
+                if '%%bigquery' in source:
+                    # Extract the SQL query after %%bigquery
+                    sql_match = re.search(r'%%bigquery.*?\n(.*)', source, re.DOTALL | re.IGNORECASE)
+                    if sql_match:
+                        info['sql_queries'].append(sql_match.group(1).strip())
+                
+                # Also check for regular triple-quote SQL
                 sql_matches = re.findall(r'"""(SELECT.*?)"""', source, re.DOTALL | re.IGNORECASE)
                 info['sql_queries'].extend(sql_matches)
                 
-                # Extract table references
-                table_matches = re.findall(r'FROM\s+([`\w.-]+)', source, re.IGNORECASE)
+                # Extract BigQuery table references (proper format: project.dataset.table)
+                table_matches = re.findall(r'FROM\s+`?([a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)`?', source, re.IGNORECASE)
                 info['table_references'].extend(table_matches)
                 
-                # Extract column references from df.columns or similar
-                col_matches = re.findall(r'\.columns.*?=.*?\[(.*?)\]', source, re.DOTALL)
-                info['column_references'].extend(col_matches)
-                
-                # Extract dataframe shape information from outputs
+                # Extract dataframe column names from df.head() outputs
                 if hasattr(cell, 'outputs'):
                     for output in cell.outputs:
-                        if output.output_type == 'execute_result' or output.output_type == 'stream':
-                            if 'text' in output:
-                                text = str(output.text)
-                                shape_match = re.search(r'\((\d+),\s*(\d+)\)', text)
-                                if shape_match:
-                                    info['dataframe_operations'].append({
-                                        'shape': (int(shape_match.group(1)), int(shape_match.group(2)))
-                                    })
+                        if output.output_type == 'execute_result':
+                            # Check if output has data
+                            if hasattr(output, 'data'):
+                                if 'text/html' in output.data:
+                                    # Parse HTML table headers
+                                    html_text = output.data['text/html']
+                                    header_matches = re.findall(r'<th[^>]*>(.*?)</th>', html_text)
+                                    if header_matches and len(header_matches) > 0:
+                                        # Filter out empty or index columns
+                                        columns = [h for h in header_matches if h and not h.isspace()]
+                                        if columns:
+                                            info['dataframe_columns'].append(columns)
+                                            # Try to get row count from the table
+                                            row_matches = re.findall(r'<tr[^>]*>', html_text)
+                                            if row_matches:
+                                                # Subtract 1 for header row
+                                                info['dataframe_row_counts'].append(len(row_matches) - 1)
+                                elif 'text/plain' in output.data:
+                                    text = output.data['text/plain']
+                                    # Look for shape information
+                                    shape_match = re.search(r'\((\d+),\s*(\d+)\)', text)
+                                    if shape_match:
+                                        info['dataframe_shapes'].append((int(shape_match.group(1)), int(shape_match.group(2))))
         
         return info
     except Exception as e:
@@ -116,10 +136,16 @@ if lab2_notebook.exists():
             if columns:
                 print(f"  Number of features: {len(columns)}")
                 print(f"  Column names: {columns}")
+    if lab2_info['dataframe_columns']:
+        print(f"  Actual DataFrame columns from notebook output: {lab2_info['dataframe_columns'][0]}")
+    if lab2_info['dataframe_shapes']:
+        print(f"  DataFrame shapes observed: {lab2_info['dataframe_shapes']}")
     data_summary['Lab 2: MT BigQuery'] = {
         'source': 'BigQuery',
         'tables': list(set(lab2_info['table_references'])),
-        'sql_queries_found': len(lab2_info['sql_queries'])
+        'sql_queries_found': len(lab2_info['sql_queries']),
+        'dataframe_columns': lab2_info['dataframe_columns'],
+        'dataframe_shapes': lab2_info['dataframe_shapes']
     }
 else:
     print("  Notebook not found")
@@ -146,10 +172,16 @@ if lab3_notebook.exists():
                 if columns:
                     print(f"  Query {i+1} - Number of features: {len(columns)}")
                     print(f"  Query {i+1} - Column names: {columns}")
+    if lab3_info['dataframe_columns']:
+        print(f"  Actual DataFrame columns from notebook output: {lab3_info['dataframe_columns'][0]}")
+    if lab3_info['dataframe_shapes']:
+        print(f"  DataFrame shapes observed: {lab3_info['dataframe_shapes']}")
     data_summary['Lab 3: Curve Fitting'] = {
         'source': 'BigQuery',
         'tables': list(set(lab3_info['table_references'])),
-        'sql_queries_found': len(lab3_info['sql_queries'])
+        'sql_queries_found': len(lab3_info['sql_queries']),
+        'dataframe_columns': lab3_info['dataframe_columns'],
+        'dataframe_shapes': lab3_info['dataframe_shapes']
     }
 else:
     print("  Notebook not found")
@@ -175,10 +207,16 @@ if lab4_notebook.exists():
                 if columns:
                     print(f"  Query {i+1} - Number of features: {len(columns)}")
                     print(f"  Query {i+1} - Column names: {columns}")
+    if lab4_info['dataframe_columns']:
+        print(f"  Actual DataFrame columns from notebook output: {lab4_info['dataframe_columns'][0]}")
+    if lab4_info['dataframe_shapes']:
+        print(f"  DataFrame shapes observed: {lab4_info['dataframe_shapes']}")
     data_summary['Lab 4: Population Coding'] = {
         'source': 'BigQuery',
         'tables': list(set(lab4_info['table_references'])),
-        'sql_queries_found': len(lab4_info['sql_queries'])
+        'sql_queries_found': len(lab4_info['sql_queries']),
+        'dataframe_columns': lab4_info['dataframe_columns'],
+        'dataframe_shapes': lab4_info['dataframe_shapes']
     }
 else:
     print("  Notebook not found")
@@ -204,10 +242,16 @@ if lab5_notebook.exists():
                 if columns:
                     print(f"  Query {i+1} - Number of features: {len(columns)}")
                     print(f"  Query {i+1} - Column names: {columns}")
+    if lab5_info['dataframe_columns']:
+        print(f"  Actual DataFrame columns from notebook output: {lab5_info['dataframe_columns'][0]}")
+    if lab5_info['dataframe_shapes']:
+        print(f"  DataFrame shapes observed: {lab5_info['dataframe_shapes']}")
     data_summary['Lab 5: Population Coding Algorithm'] = {
         'source': 'BigQuery',
         'tables': list(set(lab5_info['table_references'])),
-        'sql_queries_found': len(lab5_info['sql_queries'])
+        'sql_queries_found': len(lab5_info['sql_queries']),
+        'dataframe_columns': lab5_info['dataframe_columns'],
+        'dataframe_shapes': lab5_info['dataframe_shapes']
     }
 else:
     print("  Notebook not found")
@@ -233,10 +277,16 @@ if lab6_notebook.exists():
                 if columns:
                     print(f"  Query {i+1} - Number of features: {len(columns)}")
                     print(f"  Query {i+1} - Column names: {columns}")
+    if lab6_info['dataframe_columns']:
+        print(f"  Actual DataFrame columns from notebook output: {lab6_info['dataframe_columns'][0]}")
+    if lab6_info['dataframe_shapes']:
+        print(f"  DataFrame shapes observed: {lab6_info['dataframe_shapes']}")
     data_summary['Lab 6: Mouse Ephys'] = {
         'source': 'BigQuery',
         'tables': list(set(lab6_info['table_references'])),
-        'sql_queries_found': len(lab6_info['sql_queries'])
+        'sql_queries_found': len(lab6_info['sql_queries']),
+        'dataframe_columns': lab6_info['dataframe_columns'],
+        'dataframe_shapes': lab6_info['dataframe_shapes']
     }
 else:
     print("  Notebook not found")
@@ -262,10 +312,16 @@ if lab7_notebook.exists():
                 if columns:
                     print(f"  Query {i+1} - Number of features: {len(columns)}")
                     print(f"  Query {i+1} - Column names: {columns}")
+    if lab7_info['dataframe_columns']:
+        print(f"  Actual DataFrame columns from notebook output: {lab7_info['dataframe_columns'][0]}")
+    if lab7_info['dataframe_shapes']:
+        print(f"  DataFrame shapes observed: {lab7_info['dataframe_shapes']}")
     data_summary['Lab 7: Mouse Ephys Analysis'] = {
         'source': 'BigQuery',
         'tables': list(set(lab7_info['table_references'])),
-        'sql_queries_found': len(lab7_info['sql_queries'])
+        'sql_queries_found': len(lab7_info['sql_queries']),
+        'dataframe_columns': lab7_info['dataframe_columns'],
+        'dataframe_shapes': lab7_info['dataframe_shapes']
     }
 else:
     print("  Notebook not found")
@@ -291,10 +347,16 @@ if lab8_notebook.exists():
                 if columns:
                     print(f"  Query {i+1} - Number of features: {len(columns)}")
                     print(f"  Query {i+1} - Column names: {columns}")
+    if lab8_info['dataframe_columns']:
+        print(f"  Actual DataFrame columns from notebook output: {lab8_info['dataframe_columns'][0]}")
+    if lab8_info['dataframe_shapes']:
+        print(f"  DataFrame shapes observed: {lab8_info['dataframe_shapes']}")
     data_summary['Lab 8: Mouse LFP'] = {
         'source': 'BigQuery',
         'tables': list(set(lab8_info['table_references'])),
-        'sql_queries_found': len(lab8_info['sql_queries'])
+        'sql_queries_found': len(lab8_info['sql_queries']),
+        'dataframe_columns': lab8_info['dataframe_columns'],
+        'dataframe_shapes': lab8_info['dataframe_shapes']
     }
 else:
     print("  Notebook not found")
@@ -310,11 +372,30 @@ if lab9_notebook.exists():
     lab9_info = extract_dataframe_info_from_notebook(lab9_notebook)
     print(f"  Data source: Allen SDK - EcephysProjectCache")
     print(f"  Note: This lab uses the Allen Brain Observatory Neuropixels dataset")
-    print(f"  Data structure: Session-based with units table, spike times, stimulus presentations")
+    
+    # Extract information about Allen SDK data tables
+    if lab9_info['dataframe_columns']:
+        print(f"  Number of DataFrames found: {len(lab9_info['dataframe_columns'])}")
+        for i, cols in enumerate(lab9_info['dataframe_columns'][:3]):  # Show first 3
+            # Clean up the column list (remove row numbers)
+            actual_cols = [c for c in cols if not c.isdigit() and c not in ['...', '']]
+            if actual_cols:
+                print(f"  DataFrame {i+1} - Number of features: {len(actual_cols)}")
+                print(f"  DataFrame {i+1} - Column names: {actual_cols}")
+    
+    # Look for X.shape outputs in the notebook
+    with open(lab9_notebook, 'r') as f:
+        content = f.read()
+        # Find X.shape outputs
+        shape_matches = re.findall(r'"text/plain":\s*\[\s*"\((\d+),\s*(\d+)\)"', content)
+        if shape_matches:
+            print(f"  Spike matrix shapes found: {shape_matches}")
+    
     data_summary['Lab 9: Neuropixels PCA'] = {
         'source': 'Allen SDK',
         'access_method': 'EcephysProjectCache.from_warehouse()',
-        'note': 'Large-scale multi-area recordings'
+        'dataframe_columns': lab9_info['dataframe_columns'],
+        'note': 'Large-scale multi-area recordings with sessions, units, probes, channels tables'
     }
 else:
     print("  Notebook not found")
@@ -330,11 +411,30 @@ if lab10_notebook.exists():
     lab10_info = extract_dataframe_info_from_notebook(lab10_notebook)
     print(f"  Data source: Allen SDK - EcephysProjectCache")
     print(f"  Note: This lab uses the Allen Brain Observatory Neuropixels dataset")
-    print(f"  Data structure: Session-based with units table, spike times, stimulus presentations")
+    
+    # Extract information about Allen SDK data tables
+    if lab10_info['dataframe_columns']:
+        print(f"  Number of DataFrames found: {len(lab10_info['dataframe_columns'])}")
+        for i, cols in enumerate(lab10_info['dataframe_columns'][:3]):  # Show first 3
+            # Clean up the column list (remove row numbers)
+            actual_cols = [c for c in cols if not c.isdigit() and c not in ['...', '']]
+            if actual_cols:
+                print(f"  DataFrame {i+1} - Number of features: {len(actual_cols)}")
+                print(f"  DataFrame {i+1} - Column names: {actual_cols}")
+    
+    # Look for X.shape outputs in the notebook
+    with open(lab10_notebook, 'r') as f:
+        content = f.read()
+        # Find X.shape outputs
+        shape_matches = re.findall(r'"text/plain":\s*\[\s*"\((\d+),\s*(\d+)\)"', content)
+        if shape_matches:
+            print(f"  Spike matrix shapes found: {shape_matches}")
+    
     data_summary['Lab 10: Neuropixels NMF'] = {
         'source': 'Allen SDK',
         'access_method': 'EcephysProjectCache.from_warehouse()',
-        'note': 'Large-scale multi-area recordings'
+        'dataframe_columns': lab10_info['dataframe_columns'],
+        'note': 'Large-scale multi-area recordings with sessions, units tables'
     }
 else:
     print("  Notebook not found")

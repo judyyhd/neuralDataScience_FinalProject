@@ -1,0 +1,71 @@
+{
+  "Lab 1: MT Neuron": {
+    "source": "CSV file",
+    "rows": "180",
+    "columns": "5",
+    "column_names": "['trial_id', 'spike_times', 'condition_id', 'condition_angle', 'unit_label']",
+    "dtypes": "{'trial_id': dtype('int64'), 'spike_times': dtype('O'), 'condition_id': dtype('int64'), 'condition_angle': dtype('int64'), 'unit_label': dtype('O')}",
+    "memory_mb": "0.045978546142578125"
+  },
+  "Lab 2: MT BigQuery": {
+    "source": "BigQuery",
+    "tables": "['neural-ds-fe73.lab1_ephys.mt']",
+    "sql_queries_found": "1",
+    "dataframe_columns": "[['trial_id', 'spike_times', 'condition_id', 'condition_angle', 'unit_label', '0', '1', '2', '3', '4', '...', '175', '176', '177', '178', '179']]",
+    "dataframe_shapes": "[]"
+  },
+  "Lab 3: Curve Fitting": {
+    "source": "BigQuery",
+    "tables": "['neural-ds-fe73.lab1_ephys.mt']",
+    "sql_queries_found": "1",
+    "dataframe_columns": "[['trial_id', 'spike_times', 'condition_id', 'condition_angle', 'unit_label', '0', '1', '2', '3', '4', '...', '175', '176', '177', '178', '179']]",
+    "dataframe_shapes": "[]"
+  },
+  "Lab 4: Population Coding": {
+    "source": "BigQuery",
+    "tables": "['neural-ds-fe73.lab4_population_coding.motor_cortex']",
+    "sql_queries_found": "1",
+    "dataframe_columns": "[['trial_id', 'cell_id', 'brain_area', 'window', 'spike_count', 'direction', 'instruction_time', 'go_time', '0', '1', '2', '3', '4', '...', '45183', '45184', '45185', '45186', '45187']]",
+    "dataframe_shapes": "[]"
+  },
+  "Lab 5: Population Coding Algorithm": {
+    "source": "BigQuery",
+    "tables": "['neural-ds-fe73.lab4_population_coding.motor_cortex']",
+    "sql_queries_found": "1",
+    "dataframe_columns": "[['trial_id', 'cell_id', 'brain_area', 'window', 'spike_count', 'direction', 'instruction_time', 'go_time', '0', '1', '2', '3', '4', '...', '45183', '45184', '45185', '45186', '45187'], ['trial_id', 'px', 'py', 'magnitude', 'decoded_dir_deg', 'decoded_category', 'target_dir_deg', 'target_category', '0', '1', '2', '3', '4', '...', '153', '154', '155', '156', '157']]",
+    "dataframe_shapes": "[]"
+  },
+  "Lab 6: Mouse Ephys": {
+    "source": "BigQuery",
+    "tables": "['neural-ds-fe73.lab6_mouse_lfp.auditory_cortex']",
+    "sql_queries_found": "1",
+    "dataframe_columns": "[]",
+    "dataframe_shapes": "[]"
+  },
+  "Lab 7: Mouse Ephys Analysis": {
+    "source": "BigQuery",
+    "tables": "['neural-ds-fe73.lab6_mouse_lfp.auditory_cortex']",
+    "sql_queries_found": "1",
+    "dataframe_columns": "[['session', 'condition', 'frequency', 'amplitude', 'trial_num', 'trace', '0', '1', '2', '3', '4', '...', '77413', '77414', '77415', '77416', '77417']]",
+    "dataframe_shapes": "[]"
+  },
+  "Lab 8: Mouse LFP": {
+    "source": "BigQuery",
+    "tables": "['neural-ds-fe73.lab6_mouse_lfp.auditory_cortex']",
+    "sql_queries_found": "1",
+    "dataframe_columns": "[['session', 'condition', 'frequency', 'amplitude', 'trial_num', 'trace', '0', '1', '2', '3', '4', '...', '77413', '77414', '77415', '77416', '77417']]",
+    "dataframe_shapes": "[]"
+  },
+  "Lab 9: Neuropixels PCA": {
+    "source": "Allen SDK",
+    "access_method": "EcephysProjectCache.from_warehouse()",
+    "dataframe_columns": "[['published_at', 'specimen_id', 'session_type', 'age_in_days', 'sex', 'full_genotype', 'unit_count', 'channel_count', 'probe_count', 'ecephys_structure_acronyms', 'id', '715093703', '719161530', '721123822', '732592105', '737581020'], ['ecephys_session_id', 'lfp_sampling_rate', 'name', 'phase', 'sampling_rate', 'has_lfp_data', 'unit_count', 'channel_count', 'ecephys_structure_acronyms', 'id', '729445648', '729445650', '729445652', '729445654', '729445656'], ['ecephys_probe_id', 'local_index', 'probe_horizontal_position', 'probe_vertical_position', 'anterior_posterior_ccf_coordinate', 'dorsal_ventral_ccf_coordinate', 'left_right_ccf_coordinate', 'ecephys_structure_id', 'ecephys_structure_acronym', 'ecephys_session_id', 'lfp_sampling_rate', 'phase', 'sampling_rate', 'has_lfp_data', 'unit_count', 'id', '849705558', '849705560', '849705562', '849705564', '849705566'], ['waveform_PT_ratio', 'waveform_amplitude', 'amplitude_cutoff', 'cluster_id', 'cumulative_drift', 'd_prime', 'firing_rate', 'isi_violations', 'isolation_distance', 'L_ratio', '...', 'ecephys_structure_id', 'ecephys_structure_acronym', 'anterior_posterior_ccf_coordinate', 'dorsal_ventral_ccf_coordinate', 'left_right_ccf_coordinate', 'probe_description', 'location', 'probe_sampling_rate', 'probe_lfp_sampling_rate', 'probe_has_lfp_data', 'unit_id', '950910332', '950910326', '950910319', '950910311', '950912689', '...', '950957020', '950957004', '950956952', '950957053', '950957039']]",
+    "note": "Large-scale multi-area recordings with sessions, units, probes, channels tables"
+  },
+  "Lab 10: Neuropixels NMF": {
+    "source": "Allen SDK",
+    "access_method": "EcephysProjectCache.from_warehouse()",
+    "dataframe_columns": "[['published_at', 'specimen_id', 'session_type', 'age_in_days', 'sex', 'full_genotype', 'unit_count', 'channel_count', 'probe_count', 'ecephys_structure_acronyms', 'id', '715093703', '719161530', '721123822', '732592105', '737581020']]",
+    "note": "Large-scale multi-area recordings with sessions, units tables"
+  }
+}
