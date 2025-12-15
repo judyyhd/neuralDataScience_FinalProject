@@ -1,0 +1,146 @@
+
+================================================================================
+SESSION METADATA
+================================================================================
+Session ID: 721123822
+Session Type: brain_observatory_1.1
+Total Units: 444
+Recording Duration: 163.5 minutes (9810.6 seconds)
+
+================================================================================
+BRAIN REGIONS
+================================================================================
+Region  N_Units  Mean_Rate_Hz  Std_Rate_Hz  Min_Rate_Hz  Max_Rate_Hz
+   CA1       71     10.349131     8.241683     0.534522    37.395866
+   CA3       10      7.827306     5.450115     1.067821    19.042100
+    LP       69      7.609838     4.443124     0.145454    23.214615
+ VISal       37      5.546821     4.479533     0.271134    17.755231
+ VISam       39      5.627263     3.883838     0.208447    15.473828
+  VISl       27      9.619486     6.453901     0.748474    30.481223
+  VISp       41      8.233334     5.701445     1.558921    24.443588
+
+✓ Saved region statistics to /home/hy1331/NDS/neuralDataScience_FinalProject/results/session_region_statistics.csv
+
+================================================================================
+UNIT QUALITY METRICS
+================================================================================
+
+Signal-to-Noise Ratio (SNR):
+  Mean: 2.89
+  Median: 2.72
+  Range: [0.76, 7.31]
+
+Firing Rates (all units):
+  Mean: 8.09 Hz
+  Median: 6.03 Hz
+  Range: [0.04, 40.19] Hz
+
+================================================================================
+STIMULUS PRESENTATIONS
+================================================================================
+
+Total Stimulus Presentations: 70388
+Number of Stimulus Types: 8
+
+Stimulus Breakdown:
+      Stimulus_Type  N_Presentations  Mean_Duration_s  Total_Duration_s
+natural_movie_three            36000         0.033361       1201.002950
+  natural_movie_one            18000         0.033361        600.501430
+    static_gratings             6000         0.250209       1501.253550
+     natural_scenes             5950         0.250215       1488.776508
+             gabors             3645         0.250204        911.994800
+  drifting_gratings              628         2.001672       1257.050040
+            flashes              150         0.250206         37.530898
+        spontaneous               15        82.469973       1237.049588
+
+✓ Saved stimulus statistics to /home/hy1331/NDS/neuralDataScience_FinalProject/results/session_stimulus_statistics.csv
+
+================================================================================
+ANALYSIS-SPECIFIC INFORMATION
+================================================================================
+
+Selected Stimulus for Analysis: drifting_gratings
+Number of Presentations: 628
+Orientations Tested: 9
+Temporal Frequencies: 6 unique values
+Contrasts: 2 unique values
+
+================================================================================
+PAIRWISE ANALYSIS SCOPE
+================================================================================
+
+Regions with ≥10 units: 7
+Total region pairs analyzed: 42
+Total units included: 294
+
+Region Pairs:
+  CA1 ↔ CA3
+  CA1 ↔ LP
+  CA1 ↔ VISal
+  CA1 ↔ VISam
+  CA1 ↔ VISl
+  CA1 ↔ VISp
+  CA3 ↔ CA1
+  CA3 ↔ LP
+  CA3 ↔ VISal
+  CA3 ↔ VISam
+  CA3 ↔ VISl
+  CA3 ↔ VISp
+  LP ↔ CA1
+  LP ↔ CA3
+  LP ↔ VISal
+  LP ↔ VISam
+  LP ↔ VISl
+  LP ↔ VISp
+  VISal ↔ CA1
+  VISal ↔ CA3
+  VISal ↔ LP
+  VISal ↔ VISam
+  VISal ↔ VISl
+  VISal ↔ VISp
+  VISam ↔ CA1
+  VISam ↔ CA3
+  VISam ↔ LP
+  VISam ↔ VISal
+  VISam ↔ VISl
+  VISam ↔ VISp
+  VISl ↔ CA1
+  VISl ↔ CA3
+  VISl ↔ LP
+  VISl ↔ VISal
+  VISl ↔ VISam
+  VISl ↔ VISp
+  VISp ↔ CA1
+  VISp ↔ CA3
+  VISp ↔ LP
+  VISp ↔ VISal
+  VISp ↔ VISam
+  VISp ↔ VISl
+
+================================================================================
+MANUSCRIPT SUMMARY
+================================================================================
+
+Data were obtained from the Allen Brain Observatory Neuropixels Visual Coding 
+dataset (session 721123822). The recording session included 444 
+simultaneously recorded single units across 7 brain regions (LP: 69, 
+VISp: 41, VISl: 27, 
+VISal: 37, VISam: 39, 
+CA1: 71, CA3: 10 units). 
+The total recording duration was 163.5 minutes. 
+
+For temporal dynamics analysis, we used 628 presentations of 
+drifting_gratings stimuli. Population responses were computed by pooling 
+spikes across all units within each region, and response latencies were 
+determined using a threshold of 1.5 standard deviations above baseline firing 
+rate (computed from trial-to-trial variability).
+
+For pairwise connectivity analysis, we examined all 42 region pairs using 
+cross-correlation, Granger causality, and spike-triggered averaging. Units had 
+a mean firing rate of 8.09 ± 6.92 Hz 
+(mean ± SD) across the recording session.
+
+
+================================================================================
+✓ Analysis complete!
+================================================================================
