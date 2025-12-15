@@ -10,6 +10,7 @@
 \usepackage{microtype}      % microtypography
 \usepackage{xcolor}         % colors
 \usepackage{natbib}
+\usepackage{amsmath}
 \bibliographystyle{apalike}
 
 
@@ -47,5 +48,33 @@ This dataset offers unprecedented opportunities to examine visual information fl
 Despite the availability of this rich dataset, fundamental questions about visual information flow in the mouse brain remain incompletely resolved. Specifically: (1) Do visual areas activate in strict hierarchical sequence, or is there evidence for parallel input pathways? (2) How do cortical areas interact with thalamic nuclei—does the LP nucleus receive feedforward input or cortical feedback? (3) Which analytical approaches (cross-correlation, Granger causality, spike-triggered averages) most effectively reveal directional information flow between brain regions?
 
 Here we leverage the Allen Neuropixels dataset to systematically characterize cross-region information flow during visual stimulation. We employ complementary analytical methods to measure response latencies (identifying temporal sequence), pairwise correlations (revealing functional coupling), and directed causal relationships (testing information transfer). Our goal is to construct a data-driven model of how visual information cascades through mouse cortical and subcortical networks, providing insights into the organizational principles governing sensory processing in the mammalian brain.
+
+\section{Methods}
+\subsection{Data Acquisition}
+Data were obtained from the Allen Brain Observatory Neuropixels Visual Coding dataset \citep{AllenInstituteNeuropixels2019}, which provides simultaneous large-scale neural recordings across multiple brain regions in awake, head-fixed mice during passive viewing of visual stimuli. We analyzed session 721123822 (brain\_observatory\_1.1 session type), which contained 444 well-isolated single units recorded over 163.5 minutes using Neuropixels silicon probes \citep{jun2017fully}.
+
+Units were distributed across seven brain regions: lateral posterior thalamus (LP, \textit{n}=69 units), primary visual cortex (VISp, \textit{n}=41), lateral visual area (VISl, \textit{n}=27), anterolateral visual area (VISal, \textit{n}=37), anteromedial visual area (VISam, \textit{n}=39), and hippocampal regions CA1 (\textit{n}=71) and CA3 (\textit{n}=10). Units exhibited mean firing rates of 8.09 $\pm$ 6.92 Hz (mean $\pm$ SD) with a signal-to-noise ratio of 2.89 $\pm$ 1.24 (mean $\pm$ SD), indicating good unit isolation quality.
+
+Visual stimuli included drifting gratings, static gratings, natural images, natural movie clips, Gabor patches, and full-field flashes presented on a calibrated monitor positioned 15 cm from the mouse's eye. Spike times were extracted using Kilosort2 spike sorting \citep{Pachitariu2016} and manually curated by Allen Institute personnel. All spike times were referenced to stimulus onset times with millisecond precision.
+
+\subsection{Stimulus Selection and Preprocessing}
+For temporal dynamics analysis, we focused on responses to drifting sinusoidal gratings, which elicit robust, reliable responses in mouse visual cortex \citep{Niell2008}. The session contained 628 presentations of drifting gratings with varying orientations (9 directions), temporal frequencies (6 values), and contrasts (2 levels), each presented for 2 seconds. We selected drifting gratings over other stimulus types (natural movies, static images) because pilot analyses revealed they produced the strongest stimulus-locked responses across visual cortical areas, facilitating reliable latency estimation.
+
+For each brain region, we included only regions with $\geq$10 well-isolated units to ensure stable population-level estimates. This criterion resulted in seven regions for analysis, yielding 42 directed region pairs for connectivity analyses.
+
+\subsection{Response Latency Analysis}
+\subsubsection{Population PSTH Computation}
+To measure response timing for each brain region, we computed population peri-stimulus time histograms (PSTHs) by pooling spike times across all units within a region. For each stimulus presentation, we binned spikes in 10 ms bins from -200 ms (pre-stimulus baseline) to +500 ms (post-stimulus response) relative to grating onset. We randomly subsampled 1000 of the 628 available trials to balance computational efficiency with statistical power. The population firing rate was calculated by averaging spike counts across trials and dividing by bin width and number of units, yielding rates in Hz.
+
+\subsection{Latency Detection}
+Response latency was defined as the first time point after stimulus onset where the population firing rate exceeded a detection threshold. To properly account for biological variability rather than temporal smoothness of the averaged PSTH, we computed the threshold using trial-to-trial variance. For each trial, we summed total spike counts during the baseline period (-200 to 0 ms), converted these to firing rates (spikes/duration/n\_units), and computed the standard deviation across trials. The detection threshold was set to \texttt{baseline\_mean} + 1.5 × \texttt{baseline\_std\_trials}, where baseline variability was computed from trial-by-trial fluctuations rather than temporal fluctuations within the averaged PSTH.
+
+This approach captures genuine biological variability in neural responses across stimulus presentations, avoiding the artificially small variance that results from temporal smoothing of trial-averaged data. We applied Gaussian smoothing ($\sigma$ = 2 bins) to the population PSTH for visualization only; latency detection used unsmoothed data.
+
+Regions where the maximum post-stimulus response never exceeded threshold were classified as non-responsive. For responsive regions, we verified that detected latencies fell within the biologically plausible range of 30-150 ms for mouse visual cortex \citep{gao2010parallel}.
+
+\subsection{Statistical Analysis}
+All analyses were performed in Python 3.10 using NumPy \citep{Harris2020}, SciPy \citep{virtanen2020scipy}, and Pandas \citep{mckinney2010data}. Population PSTHs were computed using vectorized operations for computational efficiency. Statistical significance for response detection was assessed using the trial-based variance threshold described above (effectively a z-score > 1.5). Data visualization was performed using Matplotlib \citep{hunter2007matplotlib} and Seaborn \citep{waskom2021seaborn}.
+
 \bibliography{citation}
 \end{document}
