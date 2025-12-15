@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=phase1_temporal
-#SBATCH --output=logs/phase1_%j.out
-#SBATCH --error=logs/phase1_%j.err
-#SBATCH --time=01:00:00
+#SBATCH --job-name=phase2_pairwise
+#SBATCH --output=logs/phase2_%j.out
+#SBATCH --error=logs/phase2_%j.err
+#SBATCH --time=02:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
 #SBATCH --partition=cm
@@ -37,10 +37,10 @@ fi
 # source ~/miniconda3/etc/profile.d/conda.sh
 # conda activate your_env_name
 
-# Run Phase 1 analysis
-echo "Starting Phase 1: Temporal Dynamics Analysis"
+# Run Phase 2 analysis
+echo "Starting Phase 2: Pairwise Relationships Analysis"
 echo ""
-python3 analysis_phase1_temporal_dynamics.py
+python3 analysis_phase2_pairwise_relationships.py
 
 # Cleanup local data
 if [ -d "/tmp/allen_data_$SLURM_JOB_ID" ]; then

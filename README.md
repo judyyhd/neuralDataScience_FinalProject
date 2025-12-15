@@ -42,10 +42,22 @@ cd /home/hy1331/NDS/neuralDataScience_FinalProject
 python analysis_phase1_temporal_dynamics.py
 ```
 
+**Session Selection:**
+- Uses **brain_observatory** session type (not functional_connectivity)
+- Prioritizes drifting gratings stimulus for strong, reliable visual responses
+- Automatically selects session with <500 units for faster processing
+- Requires minimum 10 units per region for statistical reliability
+
 **What it does:**
 - Loads Allen SDK Neuropixels data for visual regions
-- Computes PSTHs (peri-stimulus time histograms) for each region
-- Measures response latency (time to first significant response)
+- Computes population-based PSTHs (peri-stimulus time histograms) for each region
+  - Pools spikes from all units within a region for regional population response
+  - Uses 1000 evenly-spaced trials (from total available) for performance
+  - 10ms time bins, -200ms to +500ms window around stimulus onset
+- Measures response latency using trial-based baseline variance
+  - Baseline period: -200ms to 0ms before stimulus
+  - Threshold: baseline_mean + 1.5 × trial-to-trial std (not temporal std)
+  - This captures biological variability, not measurement noise
 - Identifies the temporal cascade: V1 → V2 → higher areas → hippocampus
 - Generates visualizations and saves results to CSV
 
@@ -59,6 +71,11 @@ python analysis_phase1_temporal_dynamics.py
 - V1 (VISp) should respond first (~40-60ms)
 - Higher visual areas should respond ~10-30ms later
 - Hippocampus should respond much later (~100-150ms)
+
+**Technical Notes:**
+- Population-based PSTH is much faster than per-neuron computation (O(n_trials) vs O(n_units × n_trials))
+- Trial-based baseline variance properly captures response reliability
+- 1.5 std threshold balances sensitivity vs false positives for population responses
 
 ### Phase 2: Pairwise Relationships
 
@@ -191,6 +208,19 @@ end_time = start_time + 300  # Only first 5 minutes
 3. Make sure you have sufficient disk space for Allen SDK cache
 4. Review the project proposal for conceptual understanding
 
+## Data Source
+
+**Allen Brain Observatory – Neuropixels Visual Coding (Brain Observatory 1.1)**
+
+This project uses brain_observatory session type recordings with drifting gratings and other parametric visual stimuli. These sessions provide strong, reliable visual responses suitable for latency and connectivity analysis.
+
+Session characteristics:
+- Multi-region simultaneous recordings (Neuropixels probes)
+- 7+ visual and hippocampal regions per session
+- Multiple stimulus types: drifting gratings, gabors, flashes, natural movies
+- 300+ units per session typical
+- ~1-2 GB NWB file size per session
+
 ## Citation
 
 Data from:
@@ -200,3 +230,4 @@ Analysis methods based on:
 - Cross-correlation: Perkel et al. (1967)
 - Granger causality: Granger (1969)
 - Spike-triggered averaging: Dayan & Abbott (2001)
+- Population PSTH analysis: Churchland et al. (2012)

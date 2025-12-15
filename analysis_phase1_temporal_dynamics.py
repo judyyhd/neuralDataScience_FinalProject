@@ -169,39 +169,48 @@ def compute_region_psths(spike_times_dict, region_units, event_times, window, bi
 # LATENCY ANALYSIS
 # ============================================================================
 
-def compute_response_latency(psth, time_bins, baseline_window, threshold_std=2.0):
+def compute_response_latency(psth, time_bins, trial_matrix, baseline_window, bin_size, n_units, threshold_std=2.0):
     """
-    Compute response latency as first time point exceeding baseline + threshold
+    Use trial-based variance for threshold, not temporal variance
     
     Parameters:
     -----------
     psth : ndarray
-        Firing rate over time
+        Average firing rate (Hz) over time
     time_bins : ndarray
         Time bin centers
+    trial_matrix : ndarray
+        (n_trials, n_bins) spike counts per trial (raw counts, not Hz)
     baseline_window : tuple
-        (start, end) for baseline period
+        (start, end) time window for baseline
+    bin_size : float
+        Bin size in seconds
+    n_units : int
+        Number of units in the region (for converting counts to Hz)
     threshold_std : float
-        Number of standard deviations above baseline mean
-    
-    Returns:
-    --------
-    latency : float
-        Response latency in seconds (or np.nan if no response)
-    baseline_mean : float
-    baseline_std : float
-    threshold : float
+        Number of standard deviations above baseline for threshold
     """
-    # Get baseline statistics
     baseline_mask = (time_bins >= baseline_window[0]) & (time_bins < baseline_window[1])
-    baseline_rates = psth[baseline_mask]
-    baseline_mean = baseline_rates.mean()
-    baseline_std = baseline_rates.std()
     
-    # Define threshold
+    # Get baseline stats from AVERAGED psth
+    baseline_mean = psth[baseline_mask].mean()
+    
+    # Get baseline variability from TRIALS (not time bins)
+    # For each trial, sum all spikes during baseline period, then convert to rate
+    baseline_trial_counts = trial_matrix[:, baseline_mask].sum(axis=1)  # Total spike count per trial during baseline
+    baseline_duration = baseline_window[1] - baseline_window[0]  # Duration of baseline window
+    baseline_trial_rates = baseline_trial_counts / (baseline_duration * n_units)  # Convert to Hz
+    baseline_std = baseline_trial_rates.std()  # Variability across TRIALS in Hz
+    
+    # Now this is the real biological variability in proper units!
     threshold = baseline_mean + threshold_std * baseline_std
+    print(f"    DEBUG: baseline_mean={baseline_mean:.2f} Hz")
+    print(f"    DEBUG: baseline_std={baseline_std:.2f} Hz")
+    print(f"    DEBUG: threshold={threshold:.2f} Hz")
+    print(f"    DEBUG: max response rate={psth[time_bins >= 0].max():.2f} Hz")
+    print(f"    DEBUG: n_trials={trial_matrix.shape[0]}, n_units={n_units}")
     
-    # Find first time point after stimulus onset exceeding threshold
+    # Rest is the same...
     post_stim_mask = time_bins >= 0
     post_stim_rates = psth[post_stim_mask]
     post_stim_times = time_bins[post_stim_mask]
@@ -230,7 +239,8 @@ def compute_region_latencies(region_psths, baseline_window, threshold_std=2.0):
     print("\nComputing response latencies...")
     for region, data in region_psths.items():
         latency, baseline_mean, baseline_std, threshold = compute_response_latency(
-            data['psth'], data['time_bins'], baseline_window, threshold_std
+            data['psth'], data['time_bins'], data['trial_matrix'], 
+            baseline_window, PSTH_BIN_SIZE, data['n_units'], threshold_std
         )
         
         results.append({
@@ -427,9 +437,13 @@ def main():
     sys.stdout.flush()
     
     # Get stimulus onset times
+    # Use drifting gratings for strong, reliable visual responses
     print("\nExtracting stimulus events...")
     sys.stdout.flush()
-    event_times, selected_stimulus = get_stimulus_events(stimulus_presentations)
+    event_times, selected_stimulus = get_stimulus_events(
+        stimulus_presentations, 
+        preferred_stimuli=['drifting_gratings', 'gabors', 'flashes']  # Prefer gratings
+    )
     sys.stdout.flush()
     
     # Compute PSTHs
@@ -439,8 +453,9 @@ def main():
     )
     
     # Compute latencies
+    # Using 1.5 std instead of 2.0 because trial-to-trial variability is high
     latencies_df = compute_region_latencies(
-        region_psths, BASELINE_WINDOW, threshold_std=2.0
+        region_psths, BASELINE_WINDOW, threshold_std=1.5
     )
     
     # Save results

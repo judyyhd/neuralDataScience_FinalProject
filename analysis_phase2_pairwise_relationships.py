@@ -29,6 +29,11 @@ from analysis_phase1_temporal_dynamics import (
 # CONFIGURATION
 # ============================================================================
 
+# Setup paths - support /tmp data location for faster I/O on HPC
+import os
+DATA_DIR = Path(os.environ.get('ALLEN_DATA_DIR', str(Path.home() / 'allen_data')))
+DATA_DIR.mkdir(exist_ok=True)
+
 OUTPUT_DIR = Path('/home/hy1331/NDS/neuralDataScience_FinalProject/results')
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -147,8 +152,16 @@ def compute_pairwise_cross_correlations(spike_times_dict, region_units,
             
             cc, lags = compute_cross_correlation(rate1, rate2, max_lag_bins)
             
-            # Find peak
-            peak_idx = np.argmax(np.abs(cc))
+            # Find peak (both positive and negative)
+            pos_peak_idx = np.argmax(cc)
+            neg_peak_idx = np.argmin(cc)
+            
+            # Use whichever has larger absolute value
+            if abs(cc[pos_peak_idx]) > abs(cc[neg_peak_idx]):
+                peak_idx = pos_peak_idx
+            else:
+                peak_idx = neg_peak_idx
+                
             peak_lag = lags[peak_idx] * bin_size * 1000  # Convert to ms
             peak_cc = cc[peak_idx]
             
@@ -267,8 +280,7 @@ def compute_pairwise_granger(spike_times_dict, region_units,
 # SPIKE-TRIGGERED AVERAGE
 # ============================================================================
 
-def compute_spike_triggered_average(trigger_spikes, target_rate, target_times, 
-                                   window, bin_size):
+def compute_spike_triggered_average(trigger_spikes, target_spikes, window, bin_size):
     """
     Compute spike-triggered average of target region activity
     
@@ -276,10 +288,8 @@ def compute_spike_triggered_average(trigger_spikes, target_rate, target_times,
     -----------
     trigger_spikes : ndarray
         Spike times from trigger region
-    target_rate : ndarray
-        Binned firing rate from target region
-    target_times : ndarray
-        Time bins for target rate
+    target_spikes : ndarray
+        Spike times from target region
     window : tuple
         (start, end) time window relative to trigger spike
     bin_size : float
@@ -287,7 +297,7 @@ def compute_spike_triggered_average(trigger_spikes, target_rate, target_times,
     Returns:
     --------
     sta : ndarray
-        Spike-triggered average
+        Spike-triggered average (Hz)
     sta_times : ndarray
         Time relative to trigger spike
     """
@@ -296,31 +306,22 @@ def compute_spike_triggered_average(trigger_spikes, target_rate, target_times,
     sta_times = sta_bins[:-1] + bin_size / 2
     n_sta_bins = len(sta_times)
     
-    # Collect target activity around each trigger spike
-    stas = []
+    # Accumulate target spikes around each trigger spike
+    all_relative_spikes = []
     
     for trigger_time in trigger_spikes:
-        # Find target rate in window around trigger
-        relative_times = target_times - trigger_time
-        in_window = (relative_times >= window[0]) & (relative_times < window[1])
+        # Get target spikes relative to this trigger
+        relative_spikes = target_spikes - trigger_time
         
-        if in_window.sum() > 0:
-            window_rates = target_rate[in_window]
-            window_times = relative_times[in_window]
-            
-            # Bin into STA bins
-            sta_counts, _ = np.histogram(window_times, bins=sta_bins, weights=window_rates)
-            sta_norm, _ = np.histogram(window_times, bins=sta_bins)
-            
-            # Average where we have data
-            with np.errstate(divide='ignore', invalid='ignore'):
-                sta = np.where(sta_norm > 0, sta_counts / sta_norm, 0)
-            
-            stas.append(sta)
+        # Keep only those in window
+        in_window = (relative_spikes >= window[0]) & (relative_spikes < window[1])
+        all_relative_spikes.extend(relative_spikes[in_window])
     
-    # Average across all trigger spikes
-    if len(stas) > 0:
-        sta = np.mean(stas, axis=0)
+    # Histogram all relative spikes
+    if len(all_relative_spikes) > 0:
+        counts, _ = np.histogram(all_relative_spikes, bins=sta_bins)
+        # Convert to Hz: counts / (n_triggers * bin_size)
+        sta = counts / (len(trigger_spikes) * bin_size)
     else:
         sta = np.zeros(n_sta_bins)
     
@@ -330,20 +331,9 @@ def compute_pairwise_stas(spike_times_dict, region_units,
                          start_time, end_time, window, bin_size):
     """
     Compute spike-triggered averages for all region pairs
+    Uses spike times directly without pre-binning for better temporal precision
     """
     print("\nComputing spike-triggered averages...")
-    
-    # Bin target rates
-    target_bin_size = 0.010  # 10ms for target
-    region_rates = {}
-    region_times = {}
-    
-    for region, unit_ids in region_units.items():
-        rates, times = bin_spike_trains(
-            spike_times_dict, unit_ids, start_time, end_time, target_bin_size
-        )
-        region_rates[region] = rates
-        region_times[region] = times
     
     sta_results = {}
     regions = list(region_units.keys())
@@ -366,20 +356,29 @@ def compute_pairwise_stas(spike_times_dict, region_units,
             if region1 == region2:
                 continue
             
-            target_rate = region_rates[region2]
-            target_times = region_times[region2]
+            # Get all spikes from target region
+            target_spikes = []
+            for unit_id in region_units[region2]:
+                if unit_id in spike_times_dict:
+                    spikes = spike_times_dict[unit_id]
+                    mask = (spikes >= start_time) & (spikes <= end_time)
+                    target_spikes.extend(spikes[mask])
             
+            target_spikes = np.array(target_spikes)
+            
+            # Compute STA directly from spike times
             sta, sta_times = compute_spike_triggered_average(
-                trigger_spikes, target_rate, target_times, window, bin_size
+                trigger_spikes, target_spikes, window, bin_size
             )
             
             sta_results[(region1, region2)] = {
                 'sta': sta,
                 'times': sta_times * 1000,  # Convert to ms
-                'n_trigger_spikes': len(trigger_spikes)
+                'n_trigger_spikes': len(trigger_spikes),
+                'n_target_spikes': len(target_spikes)
             }
             
-            print(f"  {region1} -> {region2}: {len(trigger_spikes)} trigger spikes")
+            print(f"  {region1} -> {region2}: {len(trigger_spikes)} trigger spikes, {len(target_spikes)} target spikes")
     
     return sta_results
 
@@ -526,10 +525,10 @@ def main():
     
     # Load data (reuse Phase 1 functions)
     from analysis_phase1_temporal_dynamics import (
-        DATA_DIR, REGIONS_OF_INTEREST, PSTH_WINDOW
+        PSTH_WINDOW
     )
     
-    cache = load_allen_cache()
+    cache = load_allen_cache(DATA_DIR)
     session_id, session_info = get_session_with_regions(cache, required_regions=['VISp'])
     session, units, spike_times, stimulus_presentations = load_session_data(cache, session_id)
     
@@ -541,9 +540,26 @@ def main():
         print("✗ Need at least 2 regions for pairwise analysis")
         return
     
-    # Define analysis window (use full session or stimulus period)
-    start_time = stimulus_presentations['start_time'].min() - 1.0
-    end_time = stimulus_presentations['stop_time'].max() + 1.0
+    # Define analysis window (restrict to peri-stimulus periods)
+    # Use stimulus-aligned windows to capture information flow during active processing
+    peri_window = (-0.2, 0.5)  # 200ms before to 500ms after stimulus
+    
+    # Collect time segments around each stimulus
+    time_segments = []
+    for _, stim in stimulus_presentations.iterrows():
+        seg_start = stim['start_time'] + peri_window[0]
+        seg_end = stim['start_time'] + peri_window[1]
+        time_segments.append((seg_start, seg_end))
+    
+    # For simplicity, use first continuous block (or concatenate multiple)
+    # Here we'll use a subset of stimulus presentations to keep it manageable
+    max_stims = 1000
+    if len(time_segments) > max_stims:
+        indices = np.linspace(0, len(time_segments)-1, max_stims, dtype=int)
+        time_segments = [time_segments[i] for i in indices]
+    
+    start_time = time_segments[0][0]
+    end_time = time_segments[-1][1]
     
     print(f"\nAnalysis window: {start_time:.1f} to {end_time:.1f} seconds")
     print(f"Duration: {end_time - start_time:.1f} seconds")
@@ -554,10 +570,10 @@ def main():
         CC_BIN_SIZE, CC_MAX_LAG
     )
     
-    # Granger causality analysis
+    # Granger causality analysis (use smaller bins for faster interactions)
     gc_results = compute_pairwise_granger(
         spike_times, region_units, start_time, end_time,
-        bin_size=0.050, max_lag=10
+        bin_size=0.025, max_lag=10  # 25ms bins to capture 10-50ms interactions
     )
     
     # Spike-triggered averages

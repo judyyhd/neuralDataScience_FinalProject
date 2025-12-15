@@ -83,8 +83,9 @@ def get_session_with_regions(cache, required_regions=None, max_units=500):
         required_regions = ['VISp', 'VISl']  # At minimum need V1 and one higher area
     
     # Filter sessions with visual stimulus presentation
-    sessions = sessions[sessions['session_type'].str.contains('functional_connectivity', case=False, na=False)]
-    print(f"  {len(sessions)} sessions with functional_connectivity type")
+    # brain_observatory sessions have drifting gratings and other classic visual stimuli
+    sessions = sessions[sessions['session_type'].str.contains('brain_observatory', case=False, na=False)]
+    print(f"  {len(sessions)} sessions with brain_observatory type")
     
     # Find sessions with multiple regions (prefer smaller sessions for faster loading)
     print(f"\nSearching for session with regions: {required_regions}")
