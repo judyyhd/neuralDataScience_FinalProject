@@ -3,8 +3,6 @@ Phase 1: Temporal Dynamics Analysis
 Cross-Region Information Flow During Visual Stimuli
 
 This script implements:
-- Loading Allen SDK Neuropixels data
-- Filtering units by brain region
 - Computing PSTHs for each region
 - Measuring response latencies
 - Visualizing temporal dynamics across regions
@@ -18,15 +16,22 @@ from pathlib import Path
 from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 
-# Allen SDK imports
-from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
+# Import data loading functions
+from data_loader import (
+    load_allen_cache,
+    get_session_with_regions,
+    load_session_data,
+    filter_units_by_region,
+    get_stimulus_events
+)
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
 # Setup paths
-DATA_DIR = Path.home() / 'allen_data'
+import os
+DATA_DIR = Path(os.environ.get('ALLEN_DATA_DIR', str(Path.home() / 'allen_data')))
 DATA_DIR.mkdir(exist_ok=True)
 
 OUTPUT_DIR = Path('/home/hy1331/NDS/neuralDataScience_FinalProject/results')
@@ -50,126 +55,14 @@ PSTH_BIN_SIZE = 0.010  # 10 ms bins
 PSTH_WINDOW = (-0.2, 0.5)  # -200ms to +500ms around stimulus onset
 BASELINE_WINDOW = (-0.2, 0)  # Baseline period before stimulus
 SMOOTHING_SIGMA = 2  # Gaussian smoothing for PSTH (in bins)
-
-# ============================================================================
-# DATA LOADING
-# ============================================================================
-
-def load_allen_cache():
-    """Initialize Allen SDK cache"""
-    manifest_path = DATA_DIR / 'manifest.json'
-    cache = EcephysProjectCache.from_warehouse(manifest=manifest_path)
-    return cache
-
-def get_session_with_regions(cache, required_regions=None):
-    """
-    Find a session that has recordings from multiple visual regions
-    
-    Parameters:
-    -----------
-    cache : EcephysProjectCache
-    required_regions : list, optional
-        Minimum required regions
-    
-    Returns:
-    --------
-    session_id : int
-        ID of suitable session
-    session_info : pd.Series
-        Metadata for the session
-    """
-    sessions = cache.get_session_table()
-    
-    if required_regions is None:
-        required_regions = ['VISp', 'VISl']  # At minimum need V1 and one higher area
-    
-    # Filter sessions with visual stimulus presentation
-    sessions = sessions[sessions['session_type'].str.contains('functional_connectivity', case=False, na=False)]
-    
-    # Find sessions with multiple regions
-    for session_id in sessions.index:
-        session_info = sessions.loc[session_id]
-        recorded_regions = session_info['ecephys_structure_acronyms']
-        
-        # Check if required regions are present
-        has_required = all(region in recorded_regions for region in required_regions)
-        
-        if has_required:
-            print(f"\n✓ Found suitable session: {session_id}")
-            print(f"  Available regions: {recorded_regions}")
-            print(f"  Unit count: {session_info['unit_count']}")
-            return session_id, session_info
-    
-    # If no perfect match, return first session with most regions
-    session_id = sessions.index[0]
-    session_info = sessions.loc[session_id]
-    print(f"\n⚠ Using first available session: {session_id}")
-    print(f"  Available regions: {session_info['ecephys_structure_acronyms']}")
-    return session_id, session_info
-
-def load_session_data(cache, session_id):
-    """
-    Load spike times, units, and stimulus data for a session
-    
-    Parameters:
-    -----------
-    cache : EcephysProjectCache
-    session_id : int
-    
-    Returns:
-    --------
-    session : EcephysSession object
-    units : pd.DataFrame
-    spike_times : dict
-    stimulus_presentations : pd.DataFrame
-    """
-    print(f"\nLoading session {session_id}...")
-    session = cache.get_session_data(session_id)
-    
-    # Get units (neurons) with quality filtering
-    units = session.units
-    print(f"  Total units: {len(units)}")
-    
-    # Get spike times
-    spike_times = session.spike_times
-    
-    # Get stimulus presentations
-    stimulus_presentations = session.stimulus_presentations
-    print(f"  Total stimulus presentations: {len(stimulus_presentations)}")
-    
-    return session, units, spike_times, stimulus_presentations
-
-def filter_units_by_region(units, regions_of_interest):
-    """
-    Group units by brain region
-    
-    Parameters:
-    -----------
-    units : pd.DataFrame
-    regions_of_interest : list
-    
-    Returns:
-    --------
-    region_units : dict
-        Dictionary mapping region name to unit IDs
-    """
-    region_units = {}
-    
-    for region in regions_of_interest:
-        region_mask = units['ecephys_structure_acronym'] == region
-        unit_ids = units[region_mask].index.values
-        
-        if len(unit_ids) > 0:
-            region_units[region] = unit_ids
-            print(f"  {region}: {len(unit_ids)} units")
-    
-    return region_units
+MIN_UNITS_PER_REGION = 10  # Minimum units required for a region to be included
+MAX_TRIALS = 1000  # Limit number of trials for faster computation (use subset)
 
 # ============================================================================
 # PSTH COMPUTATION
 # ============================================================================
 
-def compute_psth(spike_times_dict, unit_ids, event_times, window, bin_size):
+def compute_psth(spike_times_dict, unit_ids, event_times, window, bin_size, max_trials=None):
     """
     Compute peri-stimulus time histogram (PSTH) for multiple units
     
@@ -185,6 +78,8 @@ def compute_psth(spike_times_dict, unit_ids, event_times, window, bin_size):
         (start, end) time window relative to event
     bin_size : float
         Bin size in seconds
+    max_trials : int, optional
+        Maximum number of trials to use (for speed)
     
     Returns:
     --------
@@ -195,44 +90,48 @@ def compute_psth(spike_times_dict, unit_ids, event_times, window, bin_size):
     trial_matrix : ndarray
         (n_trials, n_bins) spike counts per trial
     """
+    # Limit trials if requested
+    if max_trials is not None and len(event_times) > max_trials:
+        # Use evenly spaced subset
+        indices = np.linspace(0, len(event_times)-1, max_trials, dtype=int)
+        event_times = event_times[indices]
+    
     # Create time bins
     bins = np.arange(window[0], window[1] + bin_size, bin_size)
     time_bins = bins[:-1] + bin_size / 2
     n_bins = len(time_bins)
     n_trials = len(event_times)
     
-    # Collect spike counts across all units and trials
-    all_counts = []
-    
+    # Pool all spikes from all units in the region
+    all_spikes = []
     for unit_id in unit_ids:
-        if unit_id not in spike_times_dict:
-            continue
-            
-        spikes = spike_times_dict[unit_id]
-        trial_counts = np.zeros((n_trials, n_bins))
-        
-        for trial_idx, event_time in enumerate(event_times):
-            # Get spikes relative to event
-            trial_spikes = spikes - event_time
-            
-            # Bin spikes
-            counts, _ = np.histogram(trial_spikes, bins=bins)
-            trial_counts[trial_idx, :] = counts
-        
-        all_counts.append(trial_counts)
+        if unit_id in spike_times_dict:
+            all_spikes.append(spike_times_dict[unit_id])
     
-    # Average across units and trials, convert to Hz
-    if len(all_counts) > 0:
-        all_counts = np.array(all_counts)  # (n_units, n_trials, n_bins)
-        trial_matrix = all_counts.mean(axis=0)  # Average across units: (n_trials, n_bins)
-        psth = trial_matrix.mean(axis=0) / bin_size  # Average across trials and convert to Hz
-    else:
+    if len(all_spikes) == 0:
         trial_matrix = np.zeros((n_trials, n_bins))
         psth = np.zeros(n_bins)
+        return psth, time_bins, trial_matrix
+    
+    # Concatenate all spikes into one pool (population response)
+    pooled_spikes = np.concatenate(all_spikes)
+    
+    # Compute population PSTH across trials
+    trial_matrix = np.zeros((n_trials, n_bins))
+    for trial_idx, event_time in enumerate(event_times):
+        # Get all spikes relative to this event
+        trial_spikes = pooled_spikes - event_time
+        
+        # Bin spikes
+        counts, _ = np.histogram(trial_spikes, bins=bins)
+        trial_matrix[trial_idx, :] = counts
+    
+    # Average across trials and convert to Hz (normalized by number of units)
+    psth = trial_matrix.mean(axis=0) / (bin_size * len(unit_ids))
     
     return psth, time_bins, trial_matrix
 
-def compute_region_psths(spike_times_dict, region_units, event_times, window, bin_size):
+def compute_region_psths(spike_times_dict, region_units, event_times, window, bin_size, max_trials=None):
     """
     Compute PSTH for each brain region
     
@@ -243,10 +142,17 @@ def compute_region_psths(spike_times_dict, region_units, event_times, window, bi
     """
     region_psths = {}
     
-    print("\nComputing PSTHs for each region...")
-    for region, unit_ids in region_units.items():
+    n_trials_used = min(len(event_times), max_trials) if max_trials else len(event_times)
+    print(f"\nComputing PSTHs for each region (using {n_trials_used}/{len(event_times)} trials)...")
+    import sys
+    sys.stdout.flush()
+    
+    for idx, (region, unit_ids) in enumerate(region_units.items()):
+        print(f"  [{idx+1}/{len(region_units)}] Processing {region} ({len(unit_ids)} units)...")
+        sys.stdout.flush()
+        
         psth, time_bins, trial_matrix = compute_psth(
-            spike_times_dict, unit_ids, event_times, window, bin_size
+            spike_times_dict, unit_ids, event_times, window, bin_size, max_trials
         )
         region_psths[region] = {
             'psth': psth,
@@ -254,7 +160,8 @@ def compute_region_psths(spike_times_dict, region_units, event_times, window, bi
             'trial_matrix': trial_matrix,
             'n_units': len(unit_ids)
         }
-        print(f"  {region}: mean rate = {psth.mean():.2f} Hz")
+        print(f"      ✓ {region}: mean rate = {psth.mean():.2f} Hz")
+        sys.stdout.flush()
     
     return region_psths
 
@@ -500,46 +407,35 @@ def main():
     print("=" * 80)
     
     # Load data
-    cache = load_allen_cache()
+    cache = load_allen_cache(DATA_DIR)
     session_id, session_info = get_session_with_regions(cache, required_regions=['VISp'])
     session, units, spike_times, stimulus_presentations = load_session_data(cache, session_id)
     
     # Filter units by region
     print("\nFiltering units by brain region...")
-    region_units = filter_units_by_region(units, REGIONS_OF_INTEREST)
+    import sys
+    sys.stdout.flush()
+    
+    region_units = filter_units_by_region(units, REGIONS_OF_INTEREST, MIN_UNITS_PER_REGION)
     
     if len(region_units) == 0:
-        print("✗ No units found in regions of interest")
+        print("✗ No regions meet the minimum unit threshold")
+        print(f"  Try reducing MIN_UNITS_PER_REGION (currently {MIN_UNITS_PER_REGION})")
         return
     
-    # Get stimulus onset times (use first stimulus type available)
-    stimulus_types = stimulus_presentations['stimulus_name'].unique()
-    print(f"\nAvailable stimulus types: {stimulus_types}")
+    print(f"\n✓ Proceeding with {len(region_units)} region(s) that meet criteria")
+    sys.stdout.flush()
     
-    # Prefer natural scenes or gabors
-    preferred_stimuli = ['natural_scenes', 'natural_movie', 'gabors', 'flashes']
-    selected_stimulus = None
-    for stim in preferred_stimuli:
-        matching = [s for s in stimulus_types if stim in s.lower()]
-        if matching:
-            selected_stimulus = matching[0]
-            break
-    
-    if selected_stimulus is None:
-        selected_stimulus = stimulus_types[0]
-    
-    print(f"Using stimulus type: {selected_stimulus}")
-    
-    stim_subset = stimulus_presentations[
-        stimulus_presentations['stimulus_name'] == selected_stimulus
-    ]
-    event_times = stim_subset['start_time'].values
-    print(f"Number of stimulus presentations: {len(event_times)}")
+    # Get stimulus onset times
+    print("\nExtracting stimulus events...")
+    sys.stdout.flush()
+    event_times, selected_stimulus = get_stimulus_events(stimulus_presentations)
+    sys.stdout.flush()
     
     # Compute PSTHs
     region_psths = compute_region_psths(
         spike_times, region_units, event_times, 
-        PSTH_WINDOW, PSTH_BIN_SIZE
+        PSTH_WINDOW, PSTH_BIN_SIZE, MAX_TRIALS
     )
     
     # Compute latencies

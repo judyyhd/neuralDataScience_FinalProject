@@ -129,10 +129,31 @@ This indicates information flows from thalamus to V1 to higher visual areas to h
 
 **Solution:** The session might not have recordings from all regions. The script will work with whatever regions are available. You can modify `REGIONS_OF_INTEREST` in the scripts to focus on available regions.
 
-### Issue: Download taking too long
+### Issue: Download taking too long / Job hanging after download
 
-**Solution:** The first run downloads ~50-500 MB per session. Subsequent runs use cached data. You can:
-1. Let it finish (grab coffee ☕)
+**Solution:** The first run downloads ~50-500 MB per session. If the job hangs after download completes, the issue is slow NWB file access on network storage.
+
+**For HPC clusters (recommended):** Copy data to local disk before processing:
+```bash
+# Add to your SLURM script before running Python:
+if [ -d "$HOME/allen_data" ]; then
+    echo "Copying Allen data to local /tmp for faster I/O..."
+    mkdir -p /tmp/allen_data_$SLURM_JOB_ID
+    cp -r $HOME/allen_data/* /tmp/allen_data_$SLURM_JOB_ID/
+    export ALLEN_DATA_DIR=/tmp/allen_data_$SLURM_JOB_ID
+    echo "✓ Data copied to /tmp (local disk)"
+fi
+
+python3 analysis_phase1_temporal_dynamics.py
+
+# Cleanup after completion
+rm -rf /tmp/allen_data_$SLURM_JOB_ID
+```
+
+This improves NWB file I/O by 100x (from network storage to local SSD).
+
+**Other options:**
+1. Let it finish - subsequent runs use cached data
 2. Use a different session with fewer units
 3. Work with a subset of regions
 
