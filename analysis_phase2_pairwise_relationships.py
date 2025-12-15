@@ -534,53 +534,77 @@ def main():
     
     # Filter units by region
     print("\nFiltering units by brain region...")
+    import sys
+    sys.stdout.flush()
     region_units = filter_units_by_region(units, REGIONS_OF_INTEREST)
     
     if len(region_units) < 2:
         print("✗ Need at least 2 regions for pairwise analysis")
         return
     
+    # Get stimulus events (using Phase 1 function)
+    print("\nExtracting stimulus events...")
+    sys.stdout.flush()
+    from data_loader import get_stimulus_events
+    event_times, selected_stimulus = get_stimulus_events(
+        stimulus_presentations, 
+        preferred_stimuli=['drifting_gratings', 'gabors', 'flashes']
+    )
+    sys.stdout.flush()
+    
     # Define analysis window (restrict to peri-stimulus periods)
     # Use stimulus-aligned windows to capture information flow during active processing
     peri_window = (-0.2, 0.5)  # 200ms before to 500ms after stimulus
     
-    # Collect time segments around each stimulus
-    time_segments = []
-    for _, stim in stimulus_presentations.iterrows():
-        seg_start = stim['start_time'] + peri_window[0]
-        seg_end = stim['start_time'] + peri_window[1]
-        time_segments.append((seg_start, seg_end))
-    
-    # For simplicity, use first continuous block (or concatenate multiple)
-    # Here we'll use a subset of stimulus presentations to keep it manageable
+    # Use a subset of stimulus presentations to keep it manageable
     max_stims = 1000
-    if len(time_segments) > max_stims:
-        indices = np.linspace(0, len(time_segments)-1, max_stims, dtype=int)
-        time_segments = [time_segments[i] for i in indices]
+    if len(event_times) > max_stims:
+        indices = np.linspace(0, len(event_times)-1, max_stims, dtype=int)
+        event_times = event_times[indices]
+    
+    print(f"Using {len(event_times)} stimulus presentations")
+    sys.stdout.flush()
+    
+    # Define time segments around stimuli (vectorized)
+    time_segments = [(t + peri_window[0], t + peri_window[1]) for t in event_times]
     
     start_time = time_segments[0][0]
     end_time = time_segments[-1][1]
     
     print(f"\nAnalysis window: {start_time:.1f} to {end_time:.1f} seconds")
     print(f"Duration: {end_time - start_time:.1f} seconds")
+    print(f"Analyzing {len(region_units)} regions = {len(region_units)*(len(region_units)-1)} pairwise relationships")
+    sys.stdout.flush()
     
     # Cross-correlation analysis
+    print("\n1. Computing cross-correlations...")
+    sys.stdout.flush()
     cc_results = compute_pairwise_cross_correlations(
         spike_times, region_units, start_time, end_time,
         CC_BIN_SIZE, CC_MAX_LAG
     )
+    print(f"   ✓ Completed {len(cc_results)} pairs")
+    sys.stdout.flush()
     
     # Granger causality analysis (use smaller bins for faster interactions)
+    print("\n2. Computing Granger causality...")
+    sys.stdout.flush()
     gc_results = compute_pairwise_granger(
         spike_times, region_units, start_time, end_time,
         bin_size=0.025, max_lag=10  # 25ms bins to capture 10-50ms interactions
     )
+    print(f"   ✓ Completed {len(gc_results)} pairs")
+    sys.stdout.flush()
     
     # Spike-triggered averages
+    print("\n3. Computing spike-triggered averages...")
+    sys.stdout.flush()
     sta_results = compute_pairwise_stas(
         spike_times, region_units, start_time, end_time,
         STA_WINDOW, STA_BIN_SIZE
     )
+    print(f"   ✓ Completed {len(sta_results)} pairs")
+    sys.stdout.flush()
     
     # Save results
     cc_df = pd.DataFrame([
