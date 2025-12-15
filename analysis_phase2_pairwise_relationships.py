@@ -4,9 +4,8 @@ Cross-Region Information Flow During Visual Stimuli
 
 This script implements:
 - Cross-correlation between brain regions
-- Granger causality analysis
-- Spike-triggered averages
-- Directional connectivity inference
+- Noise correlation analysis (signal vs. noise decomposition)
+- Functional connectivity inference
 """
 
 import numpy as np
@@ -18,6 +17,8 @@ from scipy import signal, stats
 from scipy.ndimage import gaussian_filter1d
 from statsmodels.tsa.stattools import grangercausalitytests
 from itertools import combinations
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # Import Phase 1 functions for data loading
 from analysis_phase1_temporal_dynamics import (
@@ -42,8 +43,6 @@ REGIONS_OF_INTEREST = ['LGd', 'LP', 'VISp', 'VISl', 'VISal', 'VISpm', 'VISam', '
 # Analysis parameters
 CC_BIN_SIZE = 0.020  # 20 ms bins for cross-correlation
 CC_MAX_LAG = 0.200   # ±200 ms max lag
-STA_WINDOW = (-0.100, 0.020)  # 100ms before to 20ms after spike
-STA_BIN_SIZE = 0.002  # 2 ms resolution for STA
 
 # ============================================================================
 # CROSS-CORRELATION ANALYSIS
@@ -177,210 +176,150 @@ def compute_pairwise_cross_correlations(spike_times_dict, region_units,
     return cc_results
 
 # ============================================================================
-# GRANGER CAUSALITY ANALYSIS
+# NOISE CORRELATION ANALYSIS
 # ============================================================================
 
-def compute_granger_causality(rate1, rate2, max_lag=10):
+def compute_trial_psth(spike_times_dict, unit_ids, event_times, window, bin_size):
     """
-    Test if rate1 Granger-causes rate2
+    Compute trial-by-trial PSTH matrix for a region (vectorized)
     
     Parameters:
     -----------
-    rate1, rate2 : ndarray
-        Time series
-    max_lag : int
-        Maximum lag to test
-    
-    Returns:
-    --------
-    results : dict
-        F-statistics and p-values for each lag
-    """
-    # Prepare data (need to be same length, no NaNs)
-    data = np.column_stack([rate2, rate1])  # [dependent, independent]
-    
-    # Remove any NaNs or infs
-    mask = np.isfinite(data).all(axis=1)
-    data = data[mask]
-    
-    if len(data) < max_lag * 2:
-        return None
-    
-    try:
-        # Run Granger causality test
-        gc_result = grangercausalitytests(data, max_lag, verbose=False)
-        
-        # Extract results
-        results = {}
-        for lag in range(1, max_lag + 1):
-            f_stat = gc_result[lag][0]['ssr_ftest'][0]
-            p_value = gc_result[lag][0]['ssr_ftest'][1]
-            results[lag] = {'f_stat': f_stat, 'p_value': p_value}
-        
-        return results
-    except Exception as e:
-        print(f"    Granger causality failed: {e}")
-        return None
-
-def compute_pairwise_granger(spike_times_dict, region_units, 
-                            start_time, end_time, bin_size=0.050, max_lag=10):
-    """
-    Compute Granger causality for all directed region pairs
-    
-    Returns:
-    --------
-    gc_results : dict
-        Dictionary with keys (region1 -> region2) and causality results
-    """
-    print("\nComputing Granger causality...")
-    
-    # Get binned rates
-    region_rates = {}
-    for region, unit_ids in region_units.items():
-        rates, _ = bin_spike_trains(
-            spike_times_dict, unit_ids, start_time, end_time, bin_size
-        )
-        region_rates[region] = rates
-    
-    gc_results = {}
-    regions = list(region_units.keys())
-    
-    for region1 in regions:
-        for region2 in regions:
-            if region1 == region2:
-                continue
-            
-            print(f"  Testing {region1} -> {region2}...")
-            
-            rate1 = region_rates[region1]
-            rate2 = region_rates[region2]
-            
-            results = compute_granger_causality(rate1, rate2, max_lag)
-            
-            if results is not None:
-                # Find lag with minimum p-value
-                best_lag = min(results.keys(), key=lambda k: results[k]['p_value'])
-                best_p = results[best_lag]['p_value']
-                best_f = results[best_lag]['f_stat']
-                
-                gc_results[(region1, region2)] = {
-                    'best_lag': best_lag,
-                    'best_p_value': best_p,
-                    'best_f_stat': best_f,
-                    'significant': best_p < 0.05,
-                    'all_results': results
-                }
-                
-                sig_str = "✓" if best_p < 0.05 else "✗"
-                print(f"    {sig_str} Best lag={best_lag}, p={best_p:.4f}, F={best_f:.2f}")
-    
-    return gc_results
-
-# ============================================================================
-# SPIKE-TRIGGERED AVERAGE
-# ============================================================================
-
-def compute_spike_triggered_average(trigger_spikes, target_spikes, window, bin_size):
-    """
-    Compute spike-triggered average of target region activity
-    
-    Parameters:
-    -----------
-    trigger_spikes : ndarray
-        Spike times from trigger region
-    target_spikes : ndarray
-        Spike times from target region
+    spike_times_dict : dict
+    unit_ids : array-like
+    event_times : ndarray
+        Stimulus onset times
     window : tuple
-        (start, end) time window relative to trigger spike
+        (start, end) time window relative to event
     bin_size : float
     
     Returns:
     --------
-    sta : ndarray
-        Spike-triggered average (Hz)
-    sta_times : ndarray
-        Time relative to trigger spike
+    trial_matrix : ndarray, shape (n_trials, n_bins)
+        Firing rates (Hz) per trial
+    time_bins : ndarray
+        Time relative to event
     """
-    # Create bins for STA
-    sta_bins = np.arange(window[0], window[1] + bin_size, bin_size)
-    sta_times = sta_bins[:-1] + bin_size / 2
-    n_sta_bins = len(sta_times)
+    bins = np.arange(window[0], window[1] + bin_size, bin_size)
+    n_bins = len(bins) - 1
+    n_trials = len(event_times)
+    n_units = len(unit_ids)
     
-    # Accumulate target spikes around each trigger spike
-    all_relative_spikes = []
+    # Accumulate counts across all units
+    trial_matrix = np.zeros((n_trials, n_bins))
     
-    for trigger_time in trigger_spikes:
-        # Get target spikes relative to this trigger
-        relative_spikes = target_spikes - trigger_time
+    # Pool all spikes from all units in region
+    all_spikes = []
+    for unit_id in unit_ids:
+        if unit_id in spike_times_dict:
+            all_spikes.extend(spike_times_dict[unit_id])
+    
+    if len(all_spikes) > 0:
+        all_spikes = np.sort(all_spikes)
         
-        # Keep only those in window
-        in_window = (relative_spikes >= window[0]) & (relative_spikes < window[1])
-        all_relative_spikes.extend(relative_spikes[in_window])
+        # Vectorized: for each trial, use searchsorted to find spikes in window
+        for trial_idx, event_time in enumerate(event_times):
+            # Find spikes in window using binary search
+            start_idx = np.searchsorted(all_spikes, event_time + window[0], side='left')
+            end_idx = np.searchsorted(all_spikes, event_time + window[1], side='right')
+            
+            if start_idx < end_idx:
+                # Get spikes relative to event
+                trial_spikes = all_spikes[start_idx:end_idx] - event_time
+                # Bin them
+                counts, _ = np.histogram(trial_spikes, bins=bins)
+                trial_matrix[trial_idx] = counts
     
-    # Histogram all relative spikes
-    if len(all_relative_spikes) > 0:
-        counts, _ = np.histogram(all_relative_spikes, bins=sta_bins)
-        # Convert to Hz: counts / (n_triggers * bin_size)
-        sta = counts / (len(trigger_spikes) * bin_size)
-    else:
-        sta = np.zeros(n_sta_bins)
+    # Convert to firing rate (Hz)
+    if n_units > 0:
+        trial_matrix = trial_matrix / (bin_size * n_units)
     
-    return sta, sta_times
+    time_bins = bins[:-1] + bin_size / 2
+    return trial_matrix, time_bins
 
-def compute_pairwise_stas(spike_times_dict, region_units, 
-                         start_time, end_time, window, bin_size):
+def compute_noise_correlations(region1_trials, region2_trials):
     """
-    Compute spike-triggered averages for all region pairs
-    Uses spike times directly without pre-binning for better temporal precision
-    """
-    print("\nComputing spike-triggered averages...")
+    Decompose correlation into signal and noise components
     
-    sta_results = {}
+    Parameters:
+    -----------
+    region1_trials, region2_trials : ndarray
+        Shape (n_trials, n_time_bins) - firing rates per trial
+    
+    Returns:
+    --------
+    results : dict
+        - signal_corr: correlation of mean responses
+        - noise_corr_overall: correlation of trial fluctuations (pooled)
+        - noise_corr_timeseries: correlation per time bin across trials
+    """
+    # Signal = mean response across trials
+    signal1 = region1_trials.mean(axis=0)  # (n_time_bins,)
+    signal2 = region2_trials.mean(axis=0)
+    
+    # Noise = trial-by-trial deviations from mean
+    noise1 = region1_trials - signal1  # broadcasting
+    noise2 = region2_trials - signal2
+    
+    # Signal correlation (should match cross-correlation at lag=0)
+    if len(signal1) > 1:
+        signal_corr = np.corrcoef(signal1, signal2)[0, 1]
+    else:
+        signal_corr = np.nan
+    
+    # Noise correlation - overall (flatten all time bins and trials)
+    noise1_flat = noise1.flatten()
+    noise2_flat = noise2.flatten()
+    if len(noise1_flat) > 1:
+        noise_corr_overall = np.corrcoef(noise1_flat, noise2_flat)[0, 1]
+    else:
+        noise_corr_overall = np.nan
+    
+    return {
+        'signal_corr': signal_corr,
+        'noise_corr_overall': noise_corr_overall
+    }
+
+def compute_pairwise_noise_correlations(spike_times_dict, region_units, 
+                                       event_times, window, bin_size):
+    """
+    Compute noise correlations for all region pairs
+    
+    Returns:
+    --------
+    nc_results : dict
+        Dictionary with keys (region1, region2) and noise correlation results
+    """
+    print("\nComputing noise correlations...")
+    
+    # Get trial matrices for all regions
+    region_trials = {}
+    for region, unit_ids in region_units.items():
+        trial_matrix, time_bins = compute_trial_psth(
+            spike_times_dict, unit_ids, event_times, window, bin_size
+        )
+        region_trials[region] = trial_matrix
+        print(f"  {region}: {trial_matrix.shape[0]} trials × {trial_matrix.shape[1]} bins")
+    
+    # Compute pairwise noise correlations
+    nc_results = {}
     regions = list(region_units.keys())
     
-    for region1 in regions:
-        # Get all spikes from trigger region
-        trigger_spikes = []
-        for unit_id in region_units[region1]:
-            if unit_id in spike_times_dict:
-                spikes = spike_times_dict[unit_id]
-                mask = (spikes >= start_time) & (spikes <= end_time)
-                trigger_spikes.extend(spikes[mask])
-        
-        trigger_spikes = np.array(trigger_spikes)
-        
-        if len(trigger_spikes) == 0:
-            continue
-        
-        for region2 in regions:
-            if region1 == region2:
-                continue
-            
-            # Get all spikes from target region
-            target_spikes = []
-            for unit_id in region_units[region2]:
-                if unit_id in spike_times_dict:
-                    spikes = spike_times_dict[unit_id]
-                    mask = (spikes >= start_time) & (spikes <= end_time)
-                    target_spikes.extend(spikes[mask])
-            
-            target_spikes = np.array(target_spikes)
-            
-            # Compute STA directly from spike times
-            sta, sta_times = compute_spike_triggered_average(
-                trigger_spikes, target_spikes, window, bin_size
+    for i, region1 in enumerate(regions):
+        for region2 in regions[i+1:]:
+            result = compute_noise_correlations(
+                region_trials[region1],
+                region_trials[region2]
             )
             
-            sta_results[(region1, region2)] = {
-                'sta': sta,
-                'times': sta_times * 1000,  # Convert to ms
-                'n_trigger_spikes': len(trigger_spikes),
-                'n_target_spikes': len(target_spikes)
-            }
+            nc_results[(region1, region2)] = result
             
-            print(f"  {region1} -> {region2}: {len(trigger_spikes)} trigger spikes, {len(target_spikes)} target spikes")
+            print(f"  {region1} <-> {region2}: signal_corr={result['signal_corr']:.3f}, "
+                  f"noise_corr={result['noise_corr_overall']:.3f}")
     
-    return sta_results
+    return nc_results
+
+
 
 # ============================================================================
 # VISUALIZATION
@@ -425,89 +364,70 @@ def plot_cross_correlations(cc_results, output_dir):
     print(f"✓ Saved cross-correlations to {output_dir / 'phase2_cross_correlations.png'}")
     plt.close()
 
-def plot_granger_network(gc_results, output_dir):
+def plot_signal_vs_noise_comparison(nc_results, output_dir):
     """
-    Plot directed network graph based on Granger causality
+    Plot comparison of signal vs. noise correlations
     """
-    import networkx as nx
-    
-    # Build directed graph
-    G = nx.DiGraph()
-    
-    for (r1, r2), data in gc_results.items():
-        if data['significant']:
-            G.add_edge(r1, r2, weight=-np.log10(data['best_p_value'] + 1e-10))
-    
-    if len(G.edges()) == 0:
-        print("⚠ No significant Granger causality relationships found")
+    if len(nc_results) == 0:
         return
     
-    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    # Extract data for plotting
+    pairs = []
+    signal_corrs = []
+    noise_corrs = []
     
-    # Layout
-    pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+    for (r1, r2), data in nc_results.items():
+        pairs.append(f"{r1}-{r2}")
+        signal_corrs.append(data['signal_corr'])
+        noise_corrs.append(data['noise_corr_overall'])
     
-    # Draw nodes
-    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color='lightblue',
-                          edgecolors='black', linewidths=2, ax=ax)
+    # Create comparison bar plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     
-    # Draw edges with varying width based on significance
-    edges = G.edges()
-    weights = [G[u][v]['weight'] for u, v in edges]
-    nx.draw_networkx_edges(G, pos, width=[w/2 for w in weights], 
-                          edge_color='gray', arrows=True,
-                          arrowsize=20, arrowstyle='->', ax=ax)
+    # Panel A: Bar plot comparison
+    x = np.arange(len(pairs))
+    width = 0.35
     
-    # Draw labels
-    nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold', ax=ax)
+    ax1.bar(x - width/2, signal_corrs, width, label='Signal correlation',
+            color='steelblue', alpha=0.8)
+    ax1.bar(x + width/2, noise_corrs, width, label='Noise correlation',
+            color='coral', alpha=0.8)
     
-    ax.set_title('Granger Causality Network\n(Directed edges indicate significant causal influence)',
-                fontsize=14, fontweight='bold')
-    ax.axis('off')
+    ax1.set_xlabel('Region Pair', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Correlation', fontsize=12, fontweight='bold')
+    ax1.set_title('Signal vs. Noise Correlation by Region Pair',
+                  fontsize=13, fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(pairs, rotation=45, ha='right')
+    ax1.legend(fontsize=10)
+    ax1.axhline(0, color='black', linestyle='--', linewidth=0.8, alpha=0.5)
+    ax1.grid(True, alpha=0.3, axis='y')
     
-    plt.tight_layout()
-    plt.savefig(output_dir / 'phase2_granger_network.png', dpi=300, bbox_inches='tight')
-    print(f"✓ Saved Granger network to {output_dir / 'phase2_granger_network.png'}")
-    plt.close()
-
-def plot_spike_triggered_averages(sta_results, output_dir):
-    """
-    Plot spike-triggered averages
-    """
-    if len(sta_results) == 0:
-        return
+    # Panel B: Signal vs Noise scatter
+    ax2.scatter(signal_corrs, noise_corrs, s=100, alpha=0.6, c='purple')
     
-    n_pairs = len(sta_results)
-    n_cols = 3
-    n_rows = int(np.ceil(n_pairs / n_cols))
+    # Add region pair labels
+    for i, pair in enumerate(pairs):
+        ax2.annotate(pair, (signal_corrs[i], noise_corrs[i]),
+                    xytext=(5, 5), textcoords='offset points',
+                    fontsize=8, alpha=0.7)
     
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 4 * n_rows))
-    axes = axes.flatten() if n_pairs > 1 else [axes]
+    # Add diagonal reference line
+    lims = [min(ax2.get_xlim()[0], ax2.get_ylim()[0]),
+            max(ax2.get_xlim()[1], ax2.get_ylim()[1])]
+    ax2.plot(lims, lims, 'k--', alpha=0.3, linewidth=1)
     
-    for idx, ((r1, r2), data) in enumerate(sta_results.items()):
-        ax = axes[idx]
-        
-        # Smooth STA
-        sta_smooth = gaussian_filter1d(data['sta'], sigma=2)
-        
-        ax.plot(data['times'], sta_smooth, 'k-', linewidth=2)
-        ax.axhline(data['sta'].mean(), color='blue', linestyle='--', alpha=0.5, label='Baseline')
-        ax.axvline(0, color='red', linestyle='--', alpha=0.7, label='Trigger spike')
-        
-        ax.set_xlabel('Time from trigger (ms)', fontsize=10)
-        ax.set_ylabel(f'{r2} rate (Hz)', fontsize=10)
-        ax.set_title(f"Trigger: {r1} spike → Response: {r2}\n(n={data['n_trigger_spikes']} spikes)",
-                    fontsize=10, fontweight='bold')
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-    
-    # Hide unused subplots
-    for idx in range(n_pairs, len(axes)):
-        axes[idx].axis('off')
+    ax2.set_xlabel('Signal Correlation', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Noise Correlation', fontsize=12, fontweight='bold')
+    ax2.set_title('Signal vs. Noise Correlation\n(diagonal = equal contribution)',
+                  fontsize=13, fontweight='bold')
+    ax2.axhline(0, color='gray', linestyle='--', linewidth=0.8, alpha=0.3)
+    ax2.axvline(0, color='gray', linestyle='--', linewidth=0.8, alpha=0.3)
+    ax2.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(output_dir / 'phase2_spike_triggered_averages.png', dpi=300, bbox_inches='tight')
-    print(f"✓ Saved STAs to {output_dir / 'phase2_spike_triggered_averages.png'}")
+    plt.savefig(output_dir / 'phase2_signal_vs_noise_comparison.png', dpi=300, bbox_inches='tight')
+    print(f"✓ Saved signal vs noise comparison to {output_dir / 'phase2_signal_vs_noise_comparison.png'}")
     plt.close()
 
 # ============================================================================
@@ -586,24 +506,14 @@ def main():
     print(f"   ✓ Completed {len(cc_results)} pairs")
     sys.stdout.flush()
     
-    # Granger causality analysis (use smaller bins for faster interactions)
-    print("\n2. Computing Granger causality...")
+    # Noise correlation analysis (decompose signal vs. noise)
+    print("\n2. Computing noise correlations...")
     sys.stdout.flush()
-    gc_results = compute_pairwise_granger(
-        spike_times, region_units, start_time, end_time,
-        bin_size=0.025, max_lag=10  # 25ms bins to capture 10-50ms interactions
+    nc_results = compute_pairwise_noise_correlations(
+        spike_times, region_units, event_times,
+        window=peri_window, bin_size=CC_BIN_SIZE
     )
-    print(f"   ✓ Completed {len(gc_results)} pairs")
-    sys.stdout.flush()
-    
-    # Spike-triggered averages
-    print("\n3. Computing spike-triggered averages...")
-    sys.stdout.flush()
-    sta_results = compute_pairwise_stas(
-        spike_times, region_units, start_time, end_time,
-        STA_WINDOW, STA_BIN_SIZE
-    )
-    print(f"   ✓ Completed {len(sta_results)} pairs")
+    print(f"   ✓ Completed {len(nc_results)} pairs")
     sys.stdout.flush()
     
     # Save results
@@ -614,20 +524,19 @@ def main():
     ])
     cc_df.to_csv(OUTPUT_DIR / 'phase2_cross_correlations.csv', index=False)
     
-    if len(gc_results) > 0:
-        gc_df = pd.DataFrame([
-            {'source': r1, 'target': r2,
-             'best_lag': data['best_lag'], 'p_value': data['best_p_value'],
-             'f_stat': data['best_f_stat'], 'significant': data['significant']}
-            for (r1, r2), data in gc_results.items()
+    if len(nc_results) > 0:
+        nc_df = pd.DataFrame([
+            {'region1': r1, 'region2': r2,
+             'signal_corr': data['signal_corr'],
+             'noise_corr_overall': data['noise_corr_overall']}
+            for (r1, r2), data in nc_results.items()
         ])
-        gc_df.to_csv(OUTPUT_DIR / 'phase2_granger_causality.csv', index=False)
+        nc_df.to_csv(OUTPUT_DIR / 'phase2_noise_correlations.csv', index=False)
     
     # Visualize
     print("\nGenerating visualizations...")
     plot_cross_correlations(cc_results, OUTPUT_DIR)
-    plot_granger_network(gc_results, OUTPUT_DIR)
-    plot_spike_triggered_averages(sta_results, OUTPUT_DIR)
+    plot_signal_vs_noise_comparison(nc_results, OUTPUT_DIR)
     
     # Summary
     print("\n" + "=" * 80)
@@ -635,9 +544,10 @@ def main():
     print("=" * 80)
     print(f"\nRegion pairs analyzed: {len(cc_results)}")
     
-    if len(gc_results) > 0:
-        sig_gc = sum(1 for data in gc_results.values() if data['significant'])
-        print(f"Significant Granger causality relationships: {sig_gc}/{len(gc_results)}")
+    if len(nc_results) > 0:
+        print(f"\nNoise correlation decomposition:")
+        for (r1, r2), data in nc_results.items():
+            print(f"  {r1}-{r2}: signal={data['signal_corr']:.3f}, noise={data['noise_corr_overall']:.3f}")
     
     print("\n✓ Phase 2 analysis complete!")
     print(f"  Results saved to: {OUTPUT_DIR}")

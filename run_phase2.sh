@@ -2,9 +2,9 @@
 #SBATCH --job-name=phase2_pairwise
 #SBATCH --output=logs/phase2_%j.out
 #SBATCH --error=logs/phase2_%j.err
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --mem=32G
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --partition=cm
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=hy1331@nyu.edu
