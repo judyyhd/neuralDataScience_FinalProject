@@ -16,13 +16,27 @@ neuralDataScience_FinalProject/
 │   ├── phase1_*.csv                       # Phase 1 results
 │   ├── phase2_*.png                       # Phase 2 visualizations
 │   └── phase2_*.csv                       # Phase 2 results
-└── README_ANALYSIS.md                      # This file
+└── README.md                      # This file
 ```
 
 ## Installation & Setup
 
-### 1. Install Required Packages
+### 1. Create Conda Environment
 
+The project includes an `environment.yml` file with all required dependencies:
+
+```bash
+# Create the environment
+conda env create -f environment.yml
+
+# Activate the environment
+conda activate neuralDataScience
+
+# Install additional packages for Phase 2 analysis
+pip install seaborn statsmodels networkx
+```
+
+Alternatively, if you prefer to install manually:
 ```bash
 pip install numpy pandas matplotlib seaborn scipy statsmodels networkx allensdk
 ```
