@@ -3,14 +3,53 @@
 
 This project analyzes how visual information flows through different brain regions during visual stimuli presentation, using simultaneous multi-region recordings from the Allen Brain Observatory.
 
+## Scientific Motivation
+
+### The Core Question
+When a visual stimulus appears, how does neural activity cascade through the brain? Does V1 "talk to" V2, which then talks to higher areas? Or do multiple regions get activated in parallel?
+
+### Conceptual Framework
+Think of it like dropping a stone in a connected system of pools. The ripples don't just spread randomly - there are specific pathways. In the brain:
+- V1 (primary visual cortex) receives direct input from thalamus
+- Higher visual areas (V2, V4, etc.) receive input from V1 and each other
+- Thalamus (LGN, LP) both sends and receives visual information
+- Hippocampus receives highly processed information
+
+### Analysis Phases
+
+**Phase 1: Temporal Dynamics**
+- For each brain region, compute average PSTH (peristimulus time histogram) after stimulus onset
+- Measure response latency: when does each region first respond?
+- Expected pattern: V1 → higher visual areas → hippocampus (with ~10-50ms delays)
+
+**Phase 2: Pairwise Relationships**
+- Cross-correlation between regions: does V1 activity at time t predict V2 activity at time t+delay?
+- Noise correlation analysis: decompose correlations into stimulus-driven vs. connectivity-driven components
+- Signal-noise decomposition reveals direct anatomical connections vs. indirect information flow
+
+**Phase 3: Information Transfer** (Future Work)
+- Mutual information: how much does knowing V1 activity reduce uncertainty about V2 activity?
+- Transfer entropy: how much does V1's past help predict V2's future?
+- Time-lagged decoding: train decoder on V1 activity to predict stimulus, then test if V2 activity at t+50ms contains the same information
+
+**Phase 4: Stimulus-Dependent Flow** (Future Work)
+- Does information flow differently for different stimuli (natural scenes vs. gratings)?
+- Are some pathways stronger for certain visual features?
+
+### What Makes This Project Strong
+- **Uses unique dataset strength**: Simultaneous multi-region recording with Neuropixels probes
+- **Clear narrative arc**: "We tracked how visual information flows through the brain"
+- **Builds on core concepts**: Population coding, spike analysis, statistical inference
+- **Multiple difficulty levels**: Start simple (latencies, correlations), add complexity as time permits
+
 ## Project Structure
 
 ```
 neuralDataScience_FinalProject/
 ├── analysis_phase1_temporal_dynamics.py    # Response latencies, PSTHs
-├── analysis_phase2_pairwise_relationships.py  # Cross-correlations, Granger causality
+├── analysis_phase2_pairwise_relationships.py  # Cross-correlations, noise correlations
 ├── eda.py                                  # Data exploration script
-├── project_proposal.md                     # Project overview
+├── finalReport.pdf                         # Final project report
 ├── results/                                # Output directory
 │   ├── phase1_*.png                       # Phase 1 visualizations
 │   ├── phase1_*.csv                       # Phase 1 results
@@ -101,21 +140,22 @@ python analysis_phase2_pairwise_relationships.py
 
 **What it does:**
 - Computes cross-correlations between all region pairs
-- Tests Granger causality (does region A predict region B?)
-- Computes spike-triggered averages
-- Builds directed connectivity network
+- Decomposes correlations into signal and noise components
+  - **Signal correlation**: correlation of mean responses (stimulus-driven)
+  - **Noise correlation**: correlation of trial-to-trial fluctuations (connectivity-driven)
+  - Uses bootstrapping (1000 iterations) to compute 95% confidence intervals
+- Tests functional connectivity patterns across visual and hippocampal regions
 
 **Outputs:**
 - `results/phase2_cross_correlations.png` - Correlograms for each pair
-- `results/phase2_granger_network.png` - Directed network graph
-- `results/phase2_spike_triggered_averages.png` - STAs for each pair
+- `results/phase2_signal_vs_noise_comparison.png` - Signal vs. noise correlation comparison
 - `results/phase2_cross_correlations.csv` - Peak lags and correlations
-- `results/phase2_granger_causality.csv` - Causality statistics
+- `results/phase2_noise_correlations.csv` - Signal/noise correlations with confidence intervals
 
 **Expected results:**
-- Positive lags from V1 to higher areas (V1 leads)
-- Significant Granger causality: V1 → V2 → higher areas
-- Thalamus (LGd) should Granger-cause V1
+- Visual-visual pairs: Both signal and noise correlations positive (stimulus drive + connectivity)
+- Visual-hippocampus pairs: Signal correlation only, minimal noise correlation (stimulus drive only)
+- Cross-correlation peak lags reveal temporal relationships between regions
 
 ## Understanding the Outputs
 
@@ -136,9 +176,12 @@ This indicates information flows from thalamus to V1 to higher visual areas to h
 - Negative lag: Second region leads first region
 - Zero lag: Simultaneous activity
 
-**Granger causality:**
-- Significant p-value (< 0.05): Region A helps predict region B
-- Network graph shows directed edges A → B for significant relationships
+**Noise correlation decomposition:**
+- **Signal correlation**: How similar are the average responses? (stimulus-driven component)
+- **Noise correlation**: How correlated are trial-to-trial fluctuations? (connectivity-driven component)
+- Visual cortex pairs with high noise correlation suggest direct anatomical connections
+- Visual-hippocampus pairs with low noise correlation suggest indirect information flow
+- Bootstrap confidence intervals (95% CI) assess statistical significance
 
 ## Key Brain Regions
 
@@ -188,13 +231,6 @@ This improves NWB file I/O by 100x (from network storage to local SSD).
 2. Use a different session with fewer units
 3. Work with a subset of regions
 
-### Issue: Granger causality errors
-
-**Solution:** Granger causality requires sufficient data and stationarity. If you see errors:
-- Increase `bin_size` parameter (e.g., from 0.05 to 0.1 seconds)
-- Reduce `max_lag` parameter (e.g., from 10 to 5)
-- This is expected for some region pairs
-
 ### Issue: Memory errors
 
 **Solution:** The full session might be too large. Modify the code to:
@@ -215,12 +251,21 @@ end_time = start_time + 300  # Only first 5 minutes
 - Analyze feature-specific pathways
 - Context-dependent connectivity
 
+## Final Report
+
+The complete analysis, results, and interpretations are documented in **`final_report.pdf`** in this repository. The report includes:
+- Detailed methodology for each analysis phase
+- Results and visualizations
+- Interpretation of cross-region information flow patterns
+- Discussion of visual cortex vs. hippocampus connectivity differences
+- Statistical analysis with confidence intervals
+
 ## Questions or Issues?
 
 1. Check the console output for error messages
 2. Verify all packages are installed correctly
 3. Make sure you have sufficient disk space for Allen SDK cache
-4. Review the project proposal for conceptual understanding
+4. Review the project proposal and final report for conceptual understanding
 
 ## Data Source
 
@@ -242,6 +287,7 @@ Data from:
 
 Analysis methods based on:
 - Cross-correlation: Perkel et al. (1967)
-- Granger causality: Granger (1969)
-- Spike-triggered averaging: Dayan & Abbott (2001)
+- Noise correlation analysis: Cohen & Kohn (2011)
+- Signal-noise decomposition: Averbeck et al. (2006)
 - Population PSTH analysis: Churchland et al. (2012)
+- Bootstrap confidence intervals: Efron & Tibshirani (1993)

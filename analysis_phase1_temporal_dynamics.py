@@ -51,7 +51,7 @@ REGIONS_OF_INTEREST = [
 ]
 
 # Analysis parameters
-PSTH_BIN_SIZE = 0.010  # 10 ms bins
+PSTH_BIN_SIZE = 0.005  # 10 ms bins
 PSTH_WINDOW = (-0.2, 0.5)  # -200ms to +500ms around stimulus onset
 BASELINE_WINDOW = (-0.2, 0)  # Baseline period before stimulus
 SMOOTHING_SIGMA = 2  # Gaussian smoothing for PSTH (in bins)
