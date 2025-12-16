@@ -253,7 +253,7 @@ end_time = start_time + 300  # Only first 5 minutes
 
 ## Final Report
 
-The complete analysis, results, and interpretations are documented in **`final_report.pdf`** in this repository. The report includes:
+The complete analysis, results, and interpretations are documented in **`finalReport.pdf`** in this repository. The report includes:
 - Detailed methodology for each analysis phase
 - Results and visualizations
 - Interpretation of cross-region information flow patterns
