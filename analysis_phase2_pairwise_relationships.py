@@ -41,7 +41,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 REGIONS_OF_INTEREST = ['LGd', 'LP', 'VISp', 'VISl', 'VISal', 'VISpm', 'VISam', 'CA1', 'CA3']
 
 # Analysis parameters
-CC_BIN_SIZE = 0.020  # 20 ms bins for cross-correlation
+CC_BIN_SIZE = 0.010  # 10 ms bins for cross-correlation
 CC_MAX_LAG = 0.200   # ±200 ms max lag
 
 # ============================================================================
@@ -237,22 +237,29 @@ def compute_trial_psth(spike_times_dict, unit_ids, event_times, window, bin_size
     time_bins = bins[:-1] + bin_size / 2
     return trial_matrix, time_bins
 
-def compute_noise_correlations(region1_trials, region2_trials):
+def compute_noise_correlations(region1_trials, region2_trials, n_bootstrap=1000, random_seed=11089167):
     """
-    Decompose correlation into signal and noise components
+    Decompose correlation into signal and noise components with bootstrapping
     
     Parameters:
     -----------
     region1_trials, region2_trials : ndarray
         Shape (n_trials, n_time_bins) - firing rates per trial
+    n_bootstrap : int
+        Number of bootstrap iterations for confidence intervals
+    random_seed : int
+        Random seed for reproducible bootstrapping
     
     Returns:
     --------
     results : dict
         - signal_corr: correlation of mean responses
         - noise_corr_overall: correlation of trial fluctuations (pooled)
-        - noise_corr_timeseries: correlation per time bin across trials
+        - noise_corr_ci_lower: 2.5th percentile from bootstrap
+        - noise_corr_ci_upper: 97.5th percentile from bootstrap
     """
+    n_trials = region1_trials.shape[0]
+    
     # Signal = mean response across trials
     signal1 = region1_trials.mean(axis=0)  # (n_time_bins,)
     signal2 = region2_trials.mean(axis=0)
@@ -275,9 +282,36 @@ def compute_noise_correlations(region1_trials, region2_trials):
     else:
         noise_corr_overall = np.nan
     
+    # Bootstrap confidence intervals for noise correlation
+    if n_trials >= 3 and n_bootstrap > 0:
+        rng = np.random.RandomState(random_seed)
+        bootstrap_corrs = []
+        for _ in range(n_bootstrap):
+            # Resample trials with replacement
+            boot_idx = rng.choice(n_trials, size=n_trials, replace=True)
+            boot_noise1 = noise1[boot_idx].flatten()
+            boot_noise2 = noise2[boot_idx].flatten()
+            
+            if len(boot_noise1) > 1:
+                boot_corr = np.corrcoef(boot_noise1, boot_noise2)[0, 1]
+                if not np.isnan(boot_corr):
+                    bootstrap_corrs.append(boot_corr)
+        
+        if len(bootstrap_corrs) > 0:
+            noise_corr_ci_lower = np.percentile(bootstrap_corrs, 2.5)
+            noise_corr_ci_upper = np.percentile(bootstrap_corrs, 97.5)
+        else:
+            noise_corr_ci_lower = np.nan
+            noise_corr_ci_upper = np.nan
+    else:
+        noise_corr_ci_lower = np.nan
+        noise_corr_ci_upper = np.nan
+    
     return {
         'signal_corr': signal_corr,
-        'noise_corr_overall': noise_corr_overall
+        'noise_corr_overall': noise_corr_overall,
+        'noise_corr_ci_lower': noise_corr_ci_lower,
+        'noise_corr_ci_upper': noise_corr_ci_upper
     }
 
 def compute_pairwise_noise_correlations(spike_times_dict, region_units, 
@@ -315,7 +349,8 @@ def compute_pairwise_noise_correlations(spike_times_dict, region_units,
             nc_results[(region1, region2)] = result
             
             print(f"  {region1} <-> {region2}: signal_corr={result['signal_corr']:.3f}, "
-                  f"noise_corr={result['noise_corr_overall']:.3f}")
+                  f"noise_corr={result['noise_corr_overall']:.3f} "
+                  f"[{result['noise_corr_ci_lower']:.3f}, {result['noise_corr_ci_upper']:.3f}]")
     
     return nc_results
 
@@ -388,10 +423,16 @@ def plot_signal_vs_noise_comparison(nc_results, output_dir):
     x = np.arange(len(pairs))
     width = 0.35
     
+    # Extract confidence intervals
+    noise_ci_lower = [nc_results[(r1, r2)]['noise_corr_ci_lower'] for r1, r2 in nc_results.keys()]
+    noise_ci_upper = [nc_results[(r1, r2)]['noise_corr_ci_upper'] for r1, r2 in nc_results.keys()]
+    noise_errors = [np.array(noise_corrs) - np.array(noise_ci_lower),
+                    np.array(noise_ci_upper) - np.array(noise_corrs)]
+    
     ax1.bar(x - width/2, signal_corrs, width, label='Signal correlation',
             color='steelblue', alpha=0.8)
-    ax1.bar(x + width/2, noise_corrs, width, label='Noise correlation',
-            color='coral', alpha=0.8)
+    ax1.bar(x + width/2, noise_corrs, width, label='Noise correlation (95% CI)',
+            color='coral', alpha=0.8, yerr=noise_errors, capsize=3, error_kw={'linewidth': 1.5})
     
     ax1.set_xlabel('Region Pair', fontsize=12, fontweight='bold')
     ax1.set_ylabel('Correlation', fontsize=12, fontweight='bold')
@@ -528,7 +569,9 @@ def main():
         nc_df = pd.DataFrame([
             {'region1': r1, 'region2': r2,
              'signal_corr': data['signal_corr'],
-             'noise_corr_overall': data['noise_corr_overall']}
+             'noise_corr': data['noise_corr_overall'],
+             'noise_corr_ci_lower': data['noise_corr_ci_lower'],
+             'noise_corr_ci_upper': data['noise_corr_ci_upper']}
             for (r1, r2), data in nc_results.items()
         ])
         nc_df.to_csv(OUTPUT_DIR / 'phase2_noise_correlations.csv', index=False)
@@ -545,9 +588,10 @@ def main():
     print(f"\nRegion pairs analyzed: {len(cc_results)}")
     
     if len(nc_results) > 0:
-        print(f"\nNoise correlation decomposition:")
+        print(f"\nNoise correlation decomposition (with 95% CI):")
         for (r1, r2), data in nc_results.items():
-            print(f"  {r1}-{r2}: signal={data['signal_corr']:.3f}, noise={data['noise_corr_overall']:.3f}")
+            print(f"  {r1}-{r2}: signal={data['signal_corr']:.3f}, "
+                  f"noise={data['noise_corr_overall']:.3f} [{data['noise_corr_ci_lower']:.3f}, {data['noise_corr_ci_upper']:.3f}]")
     
     print("\n✓ Phase 2 analysis complete!")
     print(f"  Results saved to: {OUTPUT_DIR}")
